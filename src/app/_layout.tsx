@@ -12,6 +12,7 @@ import { SpaceGrotesk_700Bold } from '@expo-google-fonts/space-grotesk';
 import { StatusBar } from 'expo-status-bar';
 import { Colors } from '../theme';
 import { useStore } from '../store';
+import { useSession } from '../api/useSession';
 import { useAuth } from '../auth/useAuth';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
@@ -35,6 +36,8 @@ export default function RootLayout() {
   const locked = useAuth((s) => s.locked);
   const markBackground = useAuth((s) => s.markBackground);
   const checkAutoLock = useAuth((s) => s.checkAutoLock);
+  const sessionStatus = useSession((s) => s.status);
+  const sessionBootstrap = useSession((s) => s.bootstrap);
 
   useEffect(() => {
     loadAll().catch(() => undefined);
@@ -45,6 +48,10 @@ export default function RootLayout() {
   }, [authInit]);
 
   useEffect(() => {
+    sessionBootstrap().catch(() => undefined);
+  }, [sessionBootstrap]);
+
+  useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'background') markBackground();
       if (state === 'active') checkAutoLock();
@@ -53,25 +60,27 @@ export default function RootLayout() {
   }, [markBackground, checkAutoLock]);
 
   useEffect(() => {
-    if (!authReady || !ready || !navReady) return;
+    if (!authReady || !ready || !navReady || sessionStatus === 'loading') return;
     const group = segments[0];
     const screen = segments.at(1);
     if (!hasPin) {
       if (screen !== 'setup') router.replace('/(auth)/setup');
     } else if (locked) {
       if (screen !== 'unlock') router.replace('/(auth)/unlock');
+    } else if (sessionStatus === 'guest') {
+      if (screen !== 'login') router.replace('/(auth)/login');
     } else if (group === '(auth)') {
       router.replace('/(tabs)');
     }
-  }, [authReady, ready, navReady, hasPin, locked, segKey]);
+  }, [authReady, ready, navReady, hasPin, locked, sessionStatus, segKey]);
 
   useEffect(() => {
-    if ((fontsLoaded || fontError) && ready && authReady) {
+    if ((fontsLoaded || fontError) && ready && authReady && sessionStatus !== 'loading') {
       SplashScreen.hideAsync().catch(() => undefined);
     }
-  }, [fontsLoaded, fontError, ready, authReady]);
+  }, [fontsLoaded, fontError, ready, authReady, sessionStatus]);
 
-  if ((!fontsLoaded && !fontError) || !ready || !authReady) {
+  if ((!fontsLoaded && !fontError) || !ready || !authReady || sessionStatus === 'loading') {
     return (
       <View style={styles.loading}>
         <ActivityIndicator

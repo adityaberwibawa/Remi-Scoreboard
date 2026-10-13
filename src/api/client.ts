@@ -1,32 +1,12 @@
-/** REST API client: ambil leaderboard dari server (mock-first). */
+/** REST API client: leaderboard dari server + authFetch bertoken (mock-first). */
+import { refreshSession } from './auth';
 import { getMockLeaderboard } from './mock';
 import { normalizeRemoteList, type RemoteLeaderboardEntry } from './remoteTypes';
+import { baseUrl, RemoteApiError, useMock } from './config';
+import { REMOTE_TIMEOUT_MS } from './client-timeout';
+import { getCachedAccessToken, loadSession } from './session';
 
-export const REMOTE_TIMEOUT_MS = 10_000;
-
-export class RemoteApiError extends Error {
-  status?: number;
-
-  constructor(message: string, status?: number) {
-    super(message);
-    this.name = 'RemoteApiError';
-    this.status = status;
-  }
-}
-
-function baseUrl(): string {
-  return (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').replace(/\/$/, '');
-}
-
-function authHeader(): Record<string, string> {
-  const token = process.env.EXPO_PUBLIC_API_TOKEN;
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-function useMock(): boolean {
-  if (process.env.EXPO_PUBLIC_USE_MOCK === '0') return false;
-  return baseUrl().length === 0;
-}
+export { REMOTE_TIMEOUT_MS, RemoteApiError };
 
 async function fetchWithTimeout(url: string, init: RequestInit): Promise<Response> {
   const controller = new AbortController();
@@ -43,14 +23,38 @@ async function fetchWithTimeout(url: string, init: RequestInit): Promise<Respons
   }
 }
 
+async function currentAccessToken(): Promise<string | null> {
+  const cached = getCachedAccessToken();
+  if (cached) return cached;
+  const session = await loadSession().catch(() => null);
+  return session?.accessToken ?? null;
+}
+
+/**
+ * Fetch bertoken: pasang `Authorization: Bearer`, dan saat 401 coba refresh
+ * sekali lalu ulangi. Gagal refresh → sesi dianggap kedaluwarsa.
+ */
+export async function authFetch(path: string, init: RequestInit = {}, retry = true): Promise<Response> {
+  const token = await currentAccessToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...((init.headers as Record<string, string> | undefined) ?? {}),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetchWithTimeout(`${baseUrl()}${path}`, { ...init, headers });
+  if (res.status === 401 && retry) {
+    const fresh = await refreshSession().catch(() => null);
+    if (fresh?.accessToken) return authFetch(path, init, false);
+    throw new RemoteApiError('Sesi kedaluwarsa. Masuk lagi.', 401);
+  }
+  return res;
+}
+
 /** GET leaderboard. Otomatis pakai mock bila EXPO_PUBLIC_API_BASE_URL belum diisi. */
 export async function fetchRemoteLeaderboard(): Promise<RemoteLeaderboardEntry[]> {
   if (useMock()) return getMockLeaderboard();
 
-  const res = await fetchWithTimeout(`${baseUrl()}/leaderboard`, {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json', ...authHeader() },
-  });
+  const res = await authFetch('/leaderboard', { method: 'GET' });
   if (!res.ok) {
     throw new RemoteApiError(`Gagal memuat leaderboard (HTTP ${res.status}).`, res.status);
   }
