@@ -42,6 +42,16 @@ export default function TabsLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="remote"
+        options={{
+          title: 'Peringkat',
+          tabBarAccessibilityLabel: 'Tab Papan Peringkat Server',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialIcons name="leaderboard" size={size} color={color} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }
