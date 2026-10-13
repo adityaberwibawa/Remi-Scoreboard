@@ -13,6 +13,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Colors } from '../theme';
 import { useStore } from '../store';
 import { useAuth } from '../auth/useAuth';
+import { AuthProvider } from '../context/AuthContext';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
@@ -84,7 +85,7 @@ export default function RootLayout() {
   }
 
   return (
-    <>
+    <AuthProvider>
       <StatusBar style="light" />
       <Stack
         screenOptions={{
@@ -94,6 +95,7 @@ export default function RootLayout() {
         }}>
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="(auth)" />
+        <Stack.Screen name="login" />
         <Stack.Screen
           name="create"
           options={{ presentation: 'card', gestureEnabled: true }}
@@ -103,7 +105,7 @@ export default function RootLayout() {
           options={{ presentation: 'card', gestureEnabled: true }}
         />
       </Stack>
-    </>
+    </AuthProvider>
   );
 }
 

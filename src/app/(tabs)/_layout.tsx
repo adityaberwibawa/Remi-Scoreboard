@@ -33,6 +33,16 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="scores"
+        options={{
+          title: 'Skor API',
+          tabBarAccessibilityLabel: 'Tab Skor API',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialIcons name="cloud" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="players"
         options={{
           title: 'Pemain',
