@@ -1,17 +1,21 @@
 function config() {
   const url = process.env.SUPABASE_URL?.replace(/\/$/, '');
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const secretKey = process.env.SUPABASE_SECRET_KEY;
+  const legacyServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const key = secretKey || legacyServiceRoleKey;
   if (!url || !key) throw new Error('Konfigurasi database server belum lengkap.');
-  return { url, key };
+  return { url, key, usesNewSecretKey: Boolean(secretKey) };
 }
 
 export async function db(table, { method = 'GET', query = '', body, returning = false } = {}) {
-  const { url, key } = config();
+  const { url, key, usesNewSecretKey } = config();
   const response = await fetch(`${url}/rest/v1/${table}${query ? `?${query}` : ''}`, {
     method,
     headers: {
       apikey: key,
-      Authorization: `Bearer ${key}`,
+      // New sb_secret_* keys are sent as apikey only. Legacy service_role JWTs
+      // still need the Authorization header to select the service_role role.
+      ...(usesNewSecretKey ? {} : { Authorization: `Bearer ${key}` }),
       Accept: 'application/json',
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...(returning ? { Prefer: 'return=representation' } : {}),

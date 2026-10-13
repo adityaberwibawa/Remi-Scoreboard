@@ -29,7 +29,7 @@ Layar akun belum ditambahkan ke navigasi. PIN/biometrik yang sudah ada tetap men
 
 1. Buat proyek Supabase.
 2. Buka **SQL Editor**, jalankan `supabase/schema.sql`.
-3. Dari **Project Settings > API**, salin Project URL dan `service_role` key. Jangan pernah menaruh `service_role` key di aplikasi Expo.
+3. Dari **Project Settings > API Keys**, salin Project URL dan secret key (`sb_secret_...`). Jangan pernah menaruh secret key di aplikasi Expo. Backend juga masih menerima nama variabel lama `SUPABASE_SERVICE_ROLE_KEY` untuk transisi.
 
 ## Deploy ke Vercel
 
@@ -37,7 +37,7 @@ Layar akun belum ditambahkan ke navigasi. PIN/biometrik yang sudah ada tetap men
 2. Set **Root Directory** ke `backend`.
 3. Tambahkan environment variables untuk Production (dan Preview bila diperlukan):
    - `SUPABASE_URL` — URL proyek Supabase.
-   - `SUPABASE_SERVICE_ROLE_KEY` — secret server-side dari Supabase.
+   - `SUPABASE_SECRET_KEY` — secret server-side (`sb_secret_...`) dari Supabase.
    - `TOKEN_SECRET` — secret acak minimal 32 karakter, misalnya hasil `openssl rand -base64 48`.
 4. Deploy. Endpoint akan berada di `https://<deployment>.vercel.app/api/...`.
 
