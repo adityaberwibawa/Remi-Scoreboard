@@ -6,6 +6,7 @@
   "build": {
     "preview": {
       "distribution": "internal",
+      "bun": "1.4.2",
       "android": {
         "buildType": "apk"
       },
@@ -14,6 +15,7 @@
       }
     },
     "production": {
+      "bun": "1.4.2",
       "android": {
         "buildType": "app-bundle"
       },
