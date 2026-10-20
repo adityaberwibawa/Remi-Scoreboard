@@ -6,6 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppHeader } from '../../components/AppHeader';
 import { EmptyState } from '../../components/EmptyState';
 import { SessionCard } from '../../components/SessionCard';
+import { TemplateSection } from '../../components/TemplateSection';
+import { useSessionTemplates } from '../../api/useSessionTemplates';
 import { Colors, Common, FontFamily, Radius } from '../../theme';
 import { useStore } from '../../store';
 
@@ -14,6 +16,7 @@ export default function HomeScreen() {
   const players = useStore((s) => s.players);
   const sessions = useStore((s) => s.sessions);
   const loadAll = useStore((s) => s.loadAll);
+  const { templates, loading, error, retry } = useSessionTemplates();
   const ongoing = sessions.find((s) => s.status === 'ongoing');
 
   useFocusEffect(
@@ -64,6 +67,7 @@ export default function HomeScreen() {
               </View>
             </Pressable>
           </View>
+          <TemplateSection templates={templates} loading={loading} error={error} onRetry={retry} />
           {ongoing ? (
             <View style={styles.saved}>
               <Text accessibilityRole="header" style={styles.sectionTitle}>
