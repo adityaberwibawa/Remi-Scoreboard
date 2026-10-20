@@ -19,6 +19,7 @@
       }
     },
     "android": {
+      "package": "com.nba.remiscoreboard",
       "adaptiveIcon": {
         "backgroundColor": "#101415",
         "foregroundImage": "./assets/icon.png"
