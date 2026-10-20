@@ -11,6 +11,7 @@ Vercel Functions API untuk akun PentungScore. Backend ini memakai Supabase Postg
 | `POST` | `/api/auth/refresh` | Rotasi refresh token |
 | `POST` | `/api/auth/logout` | Mencabut refresh token |
 | `GET` | `/api/me` | Memeriksa access token dan mengambil profil |
+| `GET` | `/api/templates` | Daftar template sesi (publik, tanpa token) |
 
 Access token berlaku 15 menit. Refresh token berlaku 30 hari dan disimpan dalam bentuk hash di database. Kata sandi di-hash dengan scrypt.
 
@@ -28,7 +29,7 @@ Layar akun belum ditambahkan ke navigasi. PIN/biometrik yang sudah ada tetap men
 ## Supabase
 
 1. Buat proyek Supabase.
-2. Buka **SQL Editor**, jalankan `supabase/schema.sql`.
+2. Buka **SQL Editor**, jalankan `supabase/schema.sql` lalu `supabase/templates.sql` (tabel + seed template sesi).
 3. Dari **Project Settings > API Keys**, salin Project URL dan secret key (`sb_secret_...`). Jangan pernah menaruh secret key di aplikasi Expo. Backend juga masih menerima nama variabel lama `SUPABASE_SERVICE_ROLE_KEY` untuk transisi.
 
 ## Deploy ke Vercel
