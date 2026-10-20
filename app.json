@@ -26,8 +26,10 @@
       },
       "allowBackup": false,
       "permissions": [
-        "CAMERA",
-        "USE_BIOMETRIC"
+        "android.permission.CAMERA",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.USE_FINGERPRINT"
       ]
     },
     "plugins": [
@@ -62,6 +64,13 @@
           "faceIDPermission": "PentungScore memakai Face ID agar hanya pemilik perangkat yang bisa membuka data permainan."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "a3416c5f-f469-4b0a-a5ea-8cc524f1488f"
+      }
+    },
+    "owner": "adityaberwibawa"
   }
 }
