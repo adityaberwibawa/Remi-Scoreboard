@@ -11,6 +11,7 @@ import {
   insertPlayer,
   insertRound,
   insertSession,
+  replaceAllData,
   updatePlayer,
   updateRound,
   updateSessionMeta,
@@ -53,6 +54,8 @@ interface PentungState {
   ) => Promise<{ completed: boolean; winnerName?: string }>;
   undoLastRound: (sessionId: string) => Promise<boolean>;
   deleteSession: (sessionId: string) => Promise<void>;
+  /** Ganti seluruh data lokal dengan snapshot cloud (pulihkan cadangan). */
+  applySnapshot: (players: Player[], sessions: GameSession[]) => Promise<void>;
 }
 
 function suitForSeat(seatIndex: number): Suit {
@@ -70,7 +73,7 @@ export const useStore = create<PentungState>((set, get) => ({
       await getDb();
       const [players, sessions] = await Promise.all([fetchPlayers(), fetchSessions()]);
       set({ players, sessions, ready: true, loadError: null });
-    } catch (e) {
+    } catch {
       set({ ready: true, loadError: 'Gagal memuat data tersimpan.' });
     }
   },
@@ -256,6 +259,11 @@ export const useStore = create<PentungState>((set, get) => ({
   deleteSession: async (sessionId) => {
     await deleteSessionRow(sessionId);
     set({ sessions: get().sessions.filter((s) => s.id !== sessionId) });
+  },
+
+  applySnapshot: async (players, sessions) => {
+    await replaceAllData(players, sessions);
+    set({ players, sessions, loadError: null });
   },
 }));
 

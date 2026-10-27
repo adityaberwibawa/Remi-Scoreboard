@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import { deleteItem, getItem, setItem } from './secureStorage';
 
 const TOKEN_KEY = 'pentung.auth.accountTokens';
 
@@ -14,6 +14,13 @@ export interface AccountTokens {
   refreshToken: string;
   tokenType: 'Bearer';
   expiresIn: number;
+}
+
+/** Cadangan cloud: isi mentah divalidasi di lapisan UI sebelum dipulihkan. */
+export interface AccountSnapshot {
+  players: unknown[];
+  sessions: unknown[];
+  updatedAt: string | null;
 }
 
 export class AccountApiError extends Error {
@@ -55,21 +62,32 @@ export class AccountApi {
   }
 
   async me(): Promise<AccountUser> {
-    const tokens = await this.readTokens();
-    if (!tokens) throw new AccountApiError('Silakan login terlebih dahulu.', 401);
-    try {
-      const result = await this.request<{ user: AccountUser }>('/api/me', {
-        headers: { Authorization: `Bearer ${tokens.accessToken}` },
-      });
-      return result.user;
-    } catch (error) {
-      if (!(error instanceof AccountApiError) || error.status !== 401) throw error;
-      const fresh = await this.refresh(tokens.refreshToken);
-      const result = await this.request<{ user: AccountUser }>('/api/me', {
-        headers: { Authorization: `Bearer ${fresh.accessToken}` },
-      });
-      return result.user;
-    }
+    const result = await this.authorizedRequest<{ user: AccountUser }>('/api/me');
+    return result.user;
+  }
+
+  /** Apakah perangkat ini sudah punya sesi akun tersimpan (tanpa memanggil jaringan). */
+  async hasSession(): Promise<boolean> {
+    return (await this.readTokens()) !== null;
+  }
+
+  /** Profil akun yang sedang login; refresh token otomatis bila access token habis. */
+  async currentUser(): Promise<AccountUser> {
+    return this.me();
+  }
+
+  /** Ambil cadangan pemain & sesi milik akun dari server. */
+  async pullSnapshot(): Promise<AccountSnapshot> {
+    return this.authorizedRequest<AccountSnapshot>('/api/sync');
+  }
+
+  /** Simpan cadangan (snapshot terakhir menang); mengembalikan waktu server. */
+  async pushSnapshot(players: unknown[], sessions: unknown[]): Promise<string> {
+    const result = await this.authorizedRequest<{ ok: boolean; updatedAt: string }>('/api/sync', {
+      method: 'PUT',
+      body: JSON.stringify({ players, sessions }),
+    });
+    return result.updatedAt;
   }
 
   async logout(): Promise<void> {
@@ -82,7 +100,7 @@ export class AccountApi {
         });
       }
     } finally {
-      await SecureStore.deleteItemAsync(TOKEN_KEY);
+      await deleteItem(TOKEN_KEY);
     }
   }
 
@@ -95,21 +113,44 @@ export class AccountApi {
     return result;
   }
 
+  /** Request dengan Bearer token; sekali refresh otomatis bila server menjawab 401. */
+  private async authorizedRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const tokens = await this.readTokens();
+    if (!tokens) throw new AccountApiError('Silakan login terlebih dahulu.', 401);
+    const withAuth = (accessToken: string): RequestInit => ({
+      ...init,
+      headers: { ...init.headers, Authorization: `Bearer ${accessToken}` },
+    });
+    try {
+      return await this.request<T>(path, withAuth(tokens.accessToken));
+    } catch (error) {
+      if (!(error instanceof AccountApiError) || error.status !== 401) throw error;
+      let fresh: AccountTokens;
+      try {
+        fresh = await this.refresh(tokens.refreshToken);
+      } catch (refreshError) {
+        if (refreshError instanceof AccountApiError && refreshError.status === 401) {
+          await deleteItem(TOKEN_KEY);
+        }
+        throw refreshError;
+      }
+      return this.request<T>(path, withAuth(fresh.accessToken));
+    }
+  }
+
   private async readTokens(): Promise<AccountTokens | null> {
-    const raw = await SecureStore.getItemAsync(TOKEN_KEY);
+    const raw = await getItem(TOKEN_KEY);
     if (!raw) return null;
     try {
       return JSON.parse(raw) as AccountTokens;
     } catch {
-      await SecureStore.deleteItemAsync(TOKEN_KEY);
+      await deleteItem(TOKEN_KEY);
       return null;
     }
   }
 
   private async saveTokens(tokens: AccountTokens): Promise<void> {
-    await SecureStore.setItemAsync(TOKEN_KEY, JSON.stringify(tokens), {
-      keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-    });
+    await setItem(TOKEN_KEY, JSON.stringify(tokens));
   }
 
   private async request<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
