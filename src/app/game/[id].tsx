@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, useCallback } from 'react';
 import {
   Alert,
   Modal,
@@ -12,7 +12,6 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
-import { useCallback } from 'react';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppButton } from '../../components/AppButton';
@@ -419,15 +418,16 @@ export default function GameScreen() {
           <Text style={styles.barLabel}>Menu</Text>
         </Pressable>
       </View>
-      <ScoreModal
-        visible={editTarget !== null}
-        title={editTarget?.roundNumber == null ? `Input Skor Ronde ${session.rounds.length + 1}` : 'Ubah Skor'}
-        subtitle={editRoundLabel}
-        players={modalPlayers}
-        saveLabel={editTarget?.roundNumber == null ? 'Simpan Skor Ronde' : 'Simpan Perubahan'}
-        onSave={handleSaveScores}
-        onClose={() => setEditTarget(null)}
-      />
+      {editTarget !== null ? (
+        <ScoreModal
+          title={editTarget.roundNumber == null ? `Input Skor Ronde ${session.rounds.length + 1}` : 'Ubah Skor'}
+          subtitle={editRoundLabel}
+          players={modalPlayers}
+          saveLabel={editTarget.roundNumber == null ? 'Simpan Skor Ronde' : 'Simpan Perubahan'}
+          onSave={handleSaveScores}
+          onClose={() => setEditTarget(null)}
+        />
+      ) : null}
       <RankingModal
         visible={showRanking ? 'ranking' : null}
         ranking={ranks}

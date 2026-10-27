@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,7 +15,6 @@ export interface ScoreModalPlayer {
 }
 
 interface Props {
-  visible: boolean;
   title: string;
   subtitle: string;
   players: ScoreModalPlayer[];
@@ -24,28 +23,18 @@ interface Props {
   onClose: () => void;
 }
 
-/** Modal input skor: satu stepper per pemain. Nilai awal = skor tersimpan. */
-export function ScoreModal({
-  visible,
-  title,
-  subtitle,
-  players,
-  saveLabel,
-  onSave,
-  onClose,
-}: Props) {
+/**
+ * Modal input skor: satu stepper per pemain. Nilai awal = skor tersimpan.
+ * Komponen di-mount hanya saat dibuka agar nilai awal selalu sesuai ronde.
+ */
+export function ScoreModal({ title, subtitle, players, saveLabel, onSave, onClose }: Props) {
   const insets = useSafeAreaInsets();
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const seed: Record<string, string> = {};
+    for (const p of players) seed[p.player.id] = String(p.initial);
+    return seed;
+  });
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (visible) {
-      const seed: Record<string, string> = {};
-      for (const p of players) seed[p.player.id] = String(p.initial);
-      setValues(seed);
-      setError(null);
-    }
-  }, [visible, players]);
 
   const parsed = useMemo(() => {
     const out: Record<string, number> = {};
@@ -60,7 +49,7 @@ export function ScoreModal({
 
   return (
     <Modal
-      visible={visible}
+      visible
       transparent
       animationType="slide"
       onRequestClose={onClose}

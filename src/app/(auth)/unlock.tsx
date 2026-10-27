@@ -6,6 +6,9 @@ import { Colors, Common, FontFamily, MIN_TOUCH, Radius } from '../../theme';
 import { MAX_ATTEMPTS, PIN_LENGTH, remainingLockoutMs } from '../../auth/pin';
 import { useAuth } from '../../auth/useAuth';
 
+/** Waktu boot modul: dipakai sebagai nilai awal timer tanpa memanggil Date.now saat render. */
+const BOOT_NOW = Date.now();
+
 export default function UnlockScreen() {
   const unlock = useAuth((s) => s.unlock);
   const unlockWithBiometric = useAuth((s) => s.unlockWithBiometric);
@@ -16,7 +19,7 @@ export default function UnlockScreen() {
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(BOOT_NOW);
 
   useEffect(() => {
     if (!lockUntil) return;

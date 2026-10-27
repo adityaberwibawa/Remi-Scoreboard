@@ -54,8 +54,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (!authReady || !ready || !navReady) return;
-    const group = segments[0];
-    const screen = segments.at(1);
+    const [group, screen] = segKey.split('/');
     if (!hasPin) {
       if (screen !== 'setup') router.replace('/(auth)/setup');
     } else if (locked) {

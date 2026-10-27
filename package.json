@@ -43,7 +43,8 @@
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
     "test": "jest",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "verify": "npm run typecheck && npm run lint && npm test"
   },
   "private": true
 }

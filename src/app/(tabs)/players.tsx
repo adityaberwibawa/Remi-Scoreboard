@@ -241,26 +241,27 @@ export default function PlayersScreen() {
           )}
         </View>
       </ScrollView>
-      <AvatarPicker
-        visible={pickerFor !== null}
-        playerName={pickerFor === 'new' ? name.trim() || 'Pemain Baru' : (players.find((p) => p.id === pickerFor)?.name ?? '')}
-        initial={
-          pickerFor === 'new'
-            ? avatarDraft
-            : (players.find((p) => p.id === pickerFor)?.avatar ?? avatarDraft)
-        }
-        onClose={() => setPickerFor(null)}
-        onApply={(avatar) => {
-          if (pickerFor === 'new') {
-            setAvatarDraft(avatar);
-          } else if (pickerFor) {
-            updateAvatar(pickerFor, avatar).catch(() =>
-              Alert.alert('Gagal', 'Avatar gagal disimpan.'),
-            );
+      {pickerFor !== null ? (
+        <AvatarPicker
+          playerName={pickerFor === 'new' ? name.trim() || 'Pemain Baru' : (players.find((p) => p.id === pickerFor)?.name ?? '')}
+          initial={
+            pickerFor === 'new'
+              ? avatarDraft
+              : (players.find((p) => p.id === pickerFor)?.avatar ?? avatarDraft)
           }
-          setPickerFor(null);
-        }}
-      />
+          onClose={() => setPickerFor(null)}
+          onApply={(avatar) => {
+            if (pickerFor === 'new') {
+              setAvatarDraft(avatar);
+            } else if (pickerFor) {
+              updateAvatar(pickerFor, avatar).catch(() =>
+                Alert.alert('Gagal', 'Avatar gagal disimpan.'),
+              );
+            }
+            setPickerFor(null);
+          }}
+        />
+      ) : null}
       <ConfirmSheet
         visible={editing !== null}
         title="Ubah Nama Pemain"

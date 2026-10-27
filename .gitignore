@@ -36,6 +36,9 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# codegraph index
+.codegraph/
+
 # generated native folders
 /ios
 /android

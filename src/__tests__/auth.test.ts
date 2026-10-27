@@ -9,6 +9,7 @@ import {
 import { hashPin, verifyPin } from '../auth/cryptoPin';
 
 jest.mock('expo-crypto', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const nc = require('crypto');
   return {
     CryptoDigestAlgorithm: { SHA256: 'SHA-256' },

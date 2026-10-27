@@ -1,5 +1,5 @@
 import { Image, StyleSheet, Text, View } from 'react-native';
-import { AvatarTint, Colors, FontFamily, Radius } from '../theme';
+import { AvatarTint, Colors, FontFamily } from '../theme';
 import { initialsOf } from '../scoring';
 import type { Avatar } from '../types';
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Image, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, FontFamily, MIN_TOUCH, Radius, Soft } from '../theme';
@@ -24,15 +24,17 @@ const TINT: Record<AvatarColorStyle, { bg: string; fg: string; border: string }>
 };
 
 interface Props {
-  visible: boolean;
   playerName: string;
   initial: Avatar;
   onApply: (avatar: Avatar) => void;
   onClose: () => void;
 }
 
-/** Pemilih avatar: inisial (4 preset) / kamera / galeri asli. */
-export function AvatarPicker({ visible, playerName, initial, onApply, onClose }: Props) {
+/**
+ * Pemilih avatar: inisial (4 preset) / kamera / galeri asli.
+ * Komponen ini di-mount hanya saat dibuka, sehingga state awal selalu segar.
+ */
+export function AvatarPicker({ playerName, initial, onApply, onClose }: Props) {
   const [tab, setTab] = useState<Tab>('initials');
   const [colorStyle, setColorStyle] = useState<AvatarColorStyle>(
     initial.type === 'initials' ? initial.colorStyle : 'emerald',
@@ -42,16 +44,6 @@ export function AvatarPicker({ visible, playerName, initial, onApply, onClose }:
   );
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (visible) {
-      setTab('initials');
-      setColorStyle(initial.type === 'initials' ? initial.colorStyle : 'emerald');
-      setPhotoUri(initial.type === 'photo' ? initial.photoUri : null);
-      setNotice(null);
-      setBusy(false);
-    }
-  }, [visible, initial]);
 
   const takePhoto = async (source: 'camera' | 'gallery') => {
     setBusy(true);
@@ -80,7 +72,7 @@ export function AvatarPicker({ visible, playerName, initial, onApply, onClose }:
 
   return (
     <Modal
-      visible={visible}
+      visible
       transparent
       animationType="fade"
       onRequestClose={onClose}
