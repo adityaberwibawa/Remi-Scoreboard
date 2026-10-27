@@ -71,7 +71,8 @@
         {
           "faceIDPermission": "PentungScore memakai Face ID agar hanya pemilik perangkat yang bisa membuka data permainan."
         }
-      ]
+      ],
+      "expo-status-bar"
     ],
     "extra": {
       "router": {},

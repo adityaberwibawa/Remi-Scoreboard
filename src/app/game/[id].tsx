@@ -6,6 +6,7 @@ import {
   NativeSyntheticEvent,
   Pressable,
   ScrollView,
+  ScrollViewInstance,
   StyleSheet,
   Text,
   View,
@@ -56,7 +57,7 @@ export default function GameScreen() {
   const [winner, setWinner] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const labelScroll = useRef<ScrollView>(null);
+  const labelScroll = useRef<ScrollViewInstance>(null);
   const { width: windowWidth } = useWindowDimensions();
 
   useFocusEffect(

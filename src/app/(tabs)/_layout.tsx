@@ -18,7 +18,7 @@ export default function TabsLayout() {
           title: 'Home',
           tabBarAccessibilityLabel: 'Tab Home',
           tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="home" size={size} color={color} />
+            <MaterialIcons name="home" size={size} color={color as string} />
           ),
         }}
       />
@@ -28,7 +28,7 @@ export default function TabsLayout() {
           title: 'Tersimpan',
           tabBarAccessibilityLabel: 'Tab Game Tersimpan',
           tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="history" size={size} color={color} />
+            <MaterialIcons name="history" size={size} color={color as string} />
           ),
         }}
       />
@@ -38,7 +38,7 @@ export default function TabsLayout() {
           title: 'Pemain',
           tabBarAccessibilityLabel: 'Tab Kelola Pemain',
           tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="group" size={size} color={color} />
+            <MaterialIcons name="group" size={size} color={color as string} />
           ),
         }}
       />
@@ -48,7 +48,7 @@ export default function TabsLayout() {
           title: 'Akun',
           tabBarAccessibilityLabel: 'Tab Akun',
           tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="person" size={size} color={color} />
+            <MaterialIcons name="person" size={size} color={color as string} />
           ),
         }}
       />
