@@ -34,3 +34,11 @@ export async function readJson(request) {
 export function methodNotAllowed() {
   return json(405, { error: 'Metode request tidak didukung.' });
 }
+
+export function tooMany(retryAfterSeconds) {
+  const response = json(429, {
+    error: `Terlalu banyak percobaan. Coba lagi dalam ${retryAfterSeconds} detik.`,
+  });
+  response.headers.set('Retry-After', String(retryAfterSeconds));
+  return response;
+}

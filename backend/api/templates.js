@@ -9,7 +9,8 @@ export default {
     try {
       const rows = await db('session_templates', {
         query: query({
-          select: 'id,name,description,image,status,created_at,updated_at',
+          select:
+            'id,name,description,image,status,min_players,target_score_enabled,target_score,created_at,updated_at',
           order: 'id.asc',
         }),
       });

@@ -7,8 +7,9 @@ function config() {
   return { url, key, usesNewSecretKey: Boolean(secretKey) };
 }
 
-export async function db(table, { method = 'GET', query = '', body, returning = false } = {}) {
+export async function db(table, { method = 'GET', query = '', body, returning = false, prefer } = {}) {
   const { url, key, usesNewSecretKey } = config();
+  const preferHeader = [returning ? 'return=representation' : null, prefer].filter(Boolean).join(',');
   const response = await fetch(`${url}/rest/v1/${table}${query ? `?${query}` : ''}`, {
     method,
     headers: {
@@ -18,7 +19,7 @@ export async function db(table, { method = 'GET', query = '', body, returning = 
       ...(usesNewSecretKey ? {} : { Authorization: `Bearer ${key}` }),
       Accept: 'application/json',
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-      ...(returning ? { Prefer: 'return=representation' } : {}),
+      ...(preferHeader ? { Prefer: preferHeader } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });

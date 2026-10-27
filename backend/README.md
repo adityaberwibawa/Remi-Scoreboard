@@ -12,24 +12,34 @@ Vercel Functions API untuk akun PentungScore. Backend ini memakai Supabase Postg
 | `POST` | `/api/auth/logout` | Mencabut refresh token |
 | `GET` | `/api/me` | Memeriksa access token dan mengambil profil |
 | `GET` | `/api/templates` | Daftar template sesi (publik, tanpa token) |
+| `GET` | `/api/sync` | Ambil cadangan pemain & sesi milik akun |
+| `PUT` | `/api/sync` | Simpan cadangan (snapshot terakhir menang) |
+
+Endpoint auth (`register`, `login`, `refresh`) dilindungi rate limit in-memory per IP (best-effort per instance Vercel): 5 pendaftaran / 10 menit, 10 login / 10 menit, 30 refresh / 10 menit. Untuk beban publik, ganti dengan limiter terdistribusi (mis. Redis/Upstash).
 
 Access token berlaku 15 menit. Refresh token berlaku 30 hari dan disimpan dalam bentuk hash di database. Kata sandi di-hash dengan scrypt.
 
-Klien mobile dasar sudah tersedia di `src/auth/accountApi.ts`; ia menyimpan token dengan SecureStore dan bisa dipakai seperti ini setelah URL Vercel tersedia:
+Klien mobile tersedia di `src/auth/accountApi.ts` dan dipakai oleh tab **Akun**. Base URL diambil dari env build-time `EXPO_PUBLIC_API_URL` (mis. `https://remi-scoreboard-backend.vercel.app`). Contoh pemakaian:
 
 ```ts
 const accountApi = new AccountApi('https://<deployment>.vercel.app');
 await accountApi.login(email, password);
-const profile = await accountApi.me();
+const profile = await accountApi.currentUser();
+const snapshot = await accountApi.pullSnapshot();
+await accountApi.pushSnapshot(players, sessions);
 await accountApi.logout();
 ```
 
-Layar akun belum ditambahkan ke navigasi. PIN/biometrik yang sudah ada tetap mengunci aplikasi secara lokal.
+Tab Akun memungkinkan login/daftar, mencadangkan snapshot pemain & sesi, memulihkannya dengan konfirmasi, dan keluar. PIN/biometrik tetap mengunci aplikasi secara lokal dan tidak dikirim ke server.
 
 ## Supabase
 
 1. Buat proyek Supabase.
-2. Buka **SQL Editor**, jalankan `supabase/schema.sql` lalu `supabase/templates.sql` (tabel + seed template sesi).
+2. Buka **SQL Editor**, jalankan berurutan:
+   - `supabase/schema.sql` (akun + refresh token),
+   - `supabase/templates.sql` (template sesi + seed),
+   - `supabase/002_template_rules.sql` (jika tabel template sudah ada sebelum upgrade kolom aturan),
+   - `supabase/003_user_snapshots.sql` (cadangan cloud per akun).
 3. Dari **Project Settings > API Keys**, salin Project URL dan secret key (`sb_secret_...`). Jangan pernah menaruh secret key di aplikasi Expo. Backend juga masih menerima nama variabel lama `SUPABASE_SERVICE_ROLE_KEY` untuk transisi.
 
 ## Deploy ke Vercel

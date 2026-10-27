@@ -1,11 +1,15 @@
 import { db, query } from '../../lib/db.js';
 import { createAccessToken, createRefreshToken, hashRefreshToken, publicUser, refreshExpiresAt } from '../../lib/auth.js';
-import { json, methodNotAllowed, options, readJson } from '../../lib/http.js';
+import { json, methodNotAllowed, options, readJson, tooMany } from '../../lib/http.js';
+import { rateLimit } from '../../lib/rate-limit.js';
 
 export default {
   async fetch(request) {
     if (request.method === 'OPTIONS') return options();
     if (request.method !== 'POST') return methodNotAllowed();
+
+    const retryAfter = rateLimit(request, { max: 30, bucket: 'refresh' });
+    if (retryAfter) return tooMany(retryAfter);
 
     const body = await readJson(request);
     const oldToken = typeof body?.refreshToken === 'string' ? body.refreshToken : '';
