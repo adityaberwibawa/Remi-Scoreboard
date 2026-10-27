@@ -69,6 +69,11 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       scores_json TEXT NOT NULL,
       PRIMARY KEY (session_id, round_number)
     );
+    CREATE TABLE IF NOT EXISTS template_cache (
+      id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+      payload TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 }
 
@@ -302,4 +307,41 @@ export async function deleteSessionRow(sessionId: string): Promise<void> {
   await db.runAsync('DELETE FROM rounds WHERE session_id = ?', sessionId);
   await db.runAsync('DELETE FROM participants WHERE session_id = ?', sessionId);
   await db.runAsync('DELETE FROM sessions WHERE id = ?', sessionId);
+}
+
+/** Cache JSON daftar template terakhir agar bagian template tetap tampil offline. */
+export async function readTemplateCache(): Promise<string | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ payload: string }>(
+    'SELECT payload FROM template_cache WHERE id = 1',
+  );
+  return row?.payload ?? null;
+}
+
+export async function writeTemplateCache(payload: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT INTO template_cache (id, payload, updated_at) VALUES (1, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at`,
+    payload,
+    new Date().toISOString(),
+  );
+}
+
+/** Ganti seluruh data lokal dengan snapshot cloud (pulihkan cadangan). */
+export async function replaceAllData(players: Player[], sessions: GameSession[]): Promise<void> {
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM rounds');
+    await db.runAsync('DELETE FROM participants');
+    await db.runAsync('DELETE FROM sessions');
+    await db.runAsync('DELETE FROM players');
+  });
+  for (const player of players) await insertPlayer(player);
+  for (const session of sessions) {
+    await insertSession(session);
+    for (const round of session.rounds) {
+      await insertRound(session.id, round.roundNumber, round.scores);
+    }
+  }
 }

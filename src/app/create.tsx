@@ -9,7 +9,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppButton } from '../components/AppButton';
@@ -34,14 +34,29 @@ export default function CreateScreen() {
   const sessions = useStore((s) => s.sessions);
   const addPlayer = useStore((s) => s.addPlayer);
   const createSession = useStore((s) => s.createSession);
+  const params = useLocalSearchParams<{
+    title?: string;
+    minPlayers?: string;
+    targetEnabled?: string;
+    targetScore?: string;
+  }>();
 
-  const [title, setTitle] = useState('');
+  const templateTitle = typeof params.title === 'string' ? params.title : '';
+  const parsedMin = Number.parseInt(String(params.minPlayers ?? ''), 10);
+  const templateMinPlayers = Number.isFinite(parsedMin)
+    ? Math.min(MAX_PLAYERS, Math.max(MIN_PLAYERS, parsedMin))
+    : MIN_PLAYERS;
+  const defaultTargetEnabled = params.targetEnabled !== '0';
+  const parsedTarget = Number.parseInt(String(params.targetScore ?? ''), 10);
+  const defaultTarget = Number.isFinite(parsedTarget) && parsedTarget > 0 ? parsedTarget : 500;
+
+  const [title, setTitle] = useState(templateTitle);
   const [quickName, setQuickName] = useState('');
   const [quickError, setQuickError] = useState<string | null>(null);
   const [included, setIncluded] = useState<Record<string, boolean> | null>(null);
   const [dealerId, setDealerId] = useState<string | null>(null);
-  const [targetEnabled, setTargetEnabled] = useState(true);
-  const [target, setTarget] = useState('500');
+  const [targetEnabled, setTargetEnabled] = useState(defaultTargetEnabled);
+  const [target, setTarget] = useState(String(defaultTarget));
 
   const inclusion: Record<string, boolean> = useMemo(() => {
     if (included) return included;
@@ -53,7 +68,7 @@ export default function CreateScreen() {
   const activeDealer = dealerId ?? players.find((p) => p.isDealer)?.id ?? players[0]?.id;
   const readyIds = players.filter((p) => inclusion[p.id] !== false).map((p) => p.id);
   const readyCount = readyIds.length;
-  const canStart = readyCount >= MIN_PLAYERS && readyCount <= MAX_PLAYERS;
+  const canStart = readyCount >= templateMinPlayers && readyCount <= MAX_PLAYERS;
   const targetNum = Number.parseInt(target, 10);
   const targetError = targetEnabled ? validateTargetScore(targetNum) : null;
 
@@ -111,6 +126,11 @@ export default function CreateScreen() {
               returnKeyType="done"
               style={styles.heroInput}
             />
+            {templateTitle ? (
+              <Text style={styles.templateNote}>
+                Aturan dari template “{templateTitle}” — masih bisa diubah sebelum mulai.
+              </Text>
+            ) : null}
           </View>
           <View style={styles.sectionHead}>
             <Text accessibilityRole="header" style={styles.sectionTitle}>
@@ -271,14 +291,16 @@ export default function CreateScreen() {
               color={canStart ? Colors.accent : Colors.danger}
             />
             <Text style={[styles.readyText, !canStart && styles.readyWarn]}>
-              {canStart ? `${readyCount} Pemain Siap di Meja` : 'Minimal 2 Pemain Diperlukan'}
+              {canStart
+                ? `${readyCount} Pemain Siap di Meja`
+                : `Minimal ${templateMinPlayers} Pemain Diperlukan`}
             </Text>
           </View>
           <AppButton
             label="Mulai Permainan"
             disabled={!canStart || !!targetError}
             disabledReason={
-              !canStart ? 'Pilih minimal 2 pemain yang ikut.' : 'Perbaiki target skor dulu.'
+              !canStart ? `Pilih minimal ${templateMinPlayers} pemain yang ikut.` : 'Perbaiki target skor dulu.'
             }
             onPress={start}
           />
@@ -299,6 +321,12 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   heroLabel: { color: Colors.muted, fontFamily: FontFamily.bodyMedium, fontSize: 12 },
+  templateNote: {
+    color: Colors.accent,
+    fontFamily: FontFamily.body,
+    fontSize: 12,
+    marginTop: 2,
+  },
   heroInput: {
     color: Colors.ink,
     fontFamily: FontFamily.display,

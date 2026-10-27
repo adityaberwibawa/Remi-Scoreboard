@@ -67,7 +67,23 @@ export default function HomeScreen() {
               </View>
             </Pressable>
           </View>
-          <TemplateSection templates={templates} loading={loading} error={error} onRetry={retry} />
+          <TemplateSection
+            templates={templates}
+            loading={loading}
+            error={error}
+            onRetry={retry}
+            onSelect={(t) =>
+              router.push({
+                pathname: '/create',
+                params: {
+                  title: t.title,
+                  minPlayers: String(t.minPlayers),
+                  targetEnabled: t.targetScoreEnabled ? '1' : '0',
+                  targetScore: String(t.targetScore > 0 ? t.targetScore : 500),
+                },
+              })
+            }
+          />
           {ongoing ? (
             <View style={styles.saved}>
               <Text accessibilityRole="header" style={styles.sectionTitle}>
@@ -166,3 +182,4 @@ const styles = StyleSheet.create({
   },
   detailLinkText: { color: Colors.accent, fontFamily: FontFamily.bodySemi, fontSize: 14 },
 });
+

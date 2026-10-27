@@ -1,5 +1,5 @@
 /** Hook pemuat template remote: loading / error / retry (pola Slide Task 02). */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { DEFAULT_USE_MOCK, fetchSessionTemplates } from './client';
 import type { SessionTemplate } from './dto';
 
@@ -15,37 +15,35 @@ export function useSessionTemplates(useMock = DEFAULT_USE_MOCK): UseSessionTempl
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const alive = useRef(true);
 
   useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
+    let active = true;
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
     fetchSessionTemplates({ useMock, signal: controller.signal })
       .then((data) => {
-        if (alive.current) setTemplates(data);
+        if (active) setTemplates(data);
       })
       .catch((e) => {
         if (e instanceof DOMException && e.name === 'AbortError') return;
-        if (alive.current) {
+        if (active) {
           setTemplates([]);
           setError(e instanceof Error ? e.message : 'Gagal memuat template.');
         }
       })
       .finally(() => {
-        if (alive.current) setLoading(false);
+        if (active) setLoading(false);
       });
-    return () => controller.abort();
+    return () => {
+      active = false;
+      controller.abort();
+    };
   }, [useMock, attempt]);
 
-  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  const retry = useCallback(() => {
+    setLoading(true);
+    setError(null);
+    setAttempt((n) => n + 1);
+  }, []);
 
   return { templates, loading, error, retry };
 }

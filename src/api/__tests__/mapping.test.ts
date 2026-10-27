@@ -17,6 +17,9 @@ describe('mapServerTemplateToTemplate', () => {
       description: 'Sesi santai',
       image: '',
       status: 'active',
+      minPlayers: 2,
+      targetScoreEnabled: false,
+      targetScore: 0,
     });
     expect(mapped).not.toHaveProperty('created_at');
     expect(mapped).not.toHaveProperty('updated_at');
@@ -64,5 +67,39 @@ describe('mapServerTemplateList', () => {
     expect(out.map((t) => t.id)).toEqual([1]);
     expect(mapServerTemplateList(null)).toEqual([]);
     expect(mapServerTemplateList({})).toEqual([]);
+  });
+
+  it('memetakan aturan template dengan fallback aman', () => {
+    const [template] = mapServerTemplateList([
+      {
+        id: 9,
+        name: 'Turnamen',
+        description: '',
+        image: '',
+        status: 'active',
+        min_players: 4,
+        target_score_enabled: true,
+        target_score: 500,
+      },
+    ]);
+    expect(template.minPlayers).toBe(4);
+    expect(template.targetScoreEnabled).toBe(true);
+    expect(template.targetScore).toBe(500);
+
+    const [fallback] = mapServerTemplateList([
+      {
+        id: 10,
+        name: 'Aneh',
+        description: '',
+        image: '',
+        status: 'active',
+        min_players: 99,
+        target_score_enabled: 'ya',
+        target_score: -5,
+      },
+    ]);
+    expect(fallback.minPlayers).toBe(2);
+    expect(fallback.targetScoreEnabled).toBe(false);
+    expect(fallback.targetScore).toBe(0);
   });
 });

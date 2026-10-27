@@ -30,6 +30,9 @@ export interface ServerTemplateJson {
   description: string;
   image: string;
   status: string;
+  min_players?: number;
+  target_score_enabled?: boolean;
+  target_score?: number;
   created_at?: string;
   updated_at?: string;
 }
@@ -41,6 +44,12 @@ export interface SessionTemplate {
   description: string;
   image: string;
   status: TemplateStatus;
+  /** Minimum pemain agar sesi dari template ini bisa dimulai (2–6). */
+  minPlayers: number;
+  /** True bila template menetapkan batas poin akhir game. */
+  targetScoreEnabled: boolean;
+  /** Batas poin akhir game; 0 bila tidak dipakai. */
+  targetScore: number;
 }
 
 function normalizeStatus(value: unknown): TemplateStatus | null {
@@ -51,6 +60,13 @@ function toNonEmptyString(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const clean = value.trim();
   return clean.length > 0 ? clean : null;
+}
+
+function toIntInRange(value: unknown, min: number, max: number, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  const rounded = Math.trunc(value);
+  if (rounded < min || rounded > max) return fallback;
+  return rounded;
 }
 
 /**
@@ -73,6 +89,9 @@ export function mapServerTemplateToTemplate(
     description: typeof item.description === 'string' ? item.description : '',
     image: typeof item.image === 'string' ? item.image : '',
     status,
+    minPlayers: toIntInRange(item.min_players, 2, 6, 2),
+    targetScoreEnabled: item.target_score_enabled === true,
+    targetScore: toIntInRange(item.target_score, 0, 100_000, 0),
   };
 }
 

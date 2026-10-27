@@ -9,18 +9,22 @@ interface Props {
   loading: boolean;
   error: string | null;
   onRetry: () => void;
+  /** Bila diisi, template aktif bisa diketuk untuk membuka form permainan. */
+  onSelect?: (template: SessionTemplate) => void;
 }
 
-export function TemplateSection({ templates, loading, error, onRetry }: Props) {
+export function TemplateSection({ templates, loading, error, onRetry, onSelect }: Props) {
   return (
     <View style={styles.wrap}>
       <View style={styles.head}>
         <Text accessibilityRole="header" style={styles.title}>
-          Template dari API
+          Template Sesi
         </Text>
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>Dynamic</Text>
-        </View>
+        {!loading && !error && templates.length > 0 ? (
+          <View style={styles.countPill}>
+            <Text style={styles.countText}>{templates.length} tersedia</Text>
+          </View>
+        ) : null}
       </View>
 
       {loading ? (
@@ -47,34 +51,51 @@ export function TemplateSection({ templates, loading, error, onRetry }: Props) {
         </View>
       ) : (
         <View style={styles.list}>
-          {templates.map((t) => (
-            <View
-              key={t.id}
-              accessible
-              accessibilityLabel={`${t.title}. ${t.description}. Status ${t.status}.`}
-              style={styles.card}>
-              <View style={styles.iconBox}>
-                <MaterialIcons
-                  name={t.status === 'active' ? 'cloud-done' : 'cloud-off'}
-                  size={20}
-                  color={t.status === 'active' ? Colors.accent : Colors.muted}
-                />
-              </View>
-              <View style={styles.cardText}>
-                <Text style={styles.cardTitle} numberOfLines={1}>
-                  {t.title}
-                </Text>
-                <Text style={styles.cardDesc} numberOfLines={2}>
-                  {t.description}
-                </Text>
-              </View>
-              <View style={[styles.pill, t.status !== 'active' && styles.pillOff]}>
-                <Text style={[styles.pillText, t.status !== 'active' && styles.pillTextOff]}>
-                  {t.status}
-                </Text>
-              </View>
-            </View>
-          ))}
+          {templates.map((t) => {
+            const selectable = t.status === 'active' && !!onSelect;
+            const rules = [
+              `${t.minPlayers} pemain min`,
+              t.targetScoreEnabled && t.targetScore > 0 ? `target ${t.targetScore}` : null,
+            ]
+              .filter(Boolean)
+              .join(' • ');
+            return (
+              <Pressable
+                key={t.id}
+                accessibilityRole={selectable ? 'button' : undefined}
+                accessibilityState={selectable ? { disabled: false } : { disabled: true }}
+                accessibilityLabel={`${t.title}. ${t.description}. Status ${t.status}. ${rules}.`}
+                accessibilityHint={selectable ? 'Buka form permainan dengan aturan template ini' : undefined}
+                disabled={!selectable}
+                onPress={() => onSelect?.(t)}
+                style={({ pressed }) => [styles.card, pressed && selectable && styles.cardPressed]}>
+                <View style={styles.iconBox}>
+                  <MaterialIcons
+                    name={t.status === 'active' ? 'cloud-done' : 'cloud-off'}
+                    size={20}
+                    color={t.status === 'active' ? Colors.accent : Colors.muted}
+                  />
+                </View>
+                <View style={styles.cardText}>
+                  <Text style={styles.cardTitle} numberOfLines={1}>
+                    {t.title}
+                  </Text>
+                  <Text style={styles.cardDesc} numberOfLines={2}>
+                    {t.description}
+                  </Text>
+                  <Text style={styles.cardMeta}>{rules}</Text>
+                </View>
+                <View style={[styles.pill, t.status !== 'active' && styles.pillOff]}>
+                  <Text style={[styles.pillText, t.status !== 'active' && styles.pillTextOff]}>
+                    {t.status}
+                  </Text>
+                </View>
+                {selectable ? (
+                  <MaterialIcons name="chevron-right" size={18} color={Colors.muted} />
+                ) : null}
+              </Pressable>
+            );
+          })}
         </View>
       )}
     </View>
@@ -85,13 +106,13 @@ const styles = StyleSheet.create({
   wrap: { gap: 10 },
   head: { flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 4 },
   title: { color: Colors.muted, fontFamily: FontFamily.bodySemi, fontSize: 13 },
-  badge: {
+  countPill: {
     backgroundColor: Colors.raised,
     borderRadius: Radius.full,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
-  badgeText: { color: Colors.accent, fontFamily: FontFamily.bodySemi, fontSize: 11 },
+  countText: { color: Colors.muted, fontFamily: FontFamily.bodySemi, fontSize: 11 },
   state: {
     backgroundColor: Colors.card,
     borderWidth: 1,
@@ -126,6 +147,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
+  cardPressed: { backgroundColor: Colors.raised },
   iconBox: {
     width: 40,
     height: 40,
@@ -137,6 +159,7 @@ const styles = StyleSheet.create({
   cardText: { flex: 1, gap: 2 },
   cardTitle: { color: Colors.ink, fontFamily: FontFamily.bodySemi, fontSize: 14 },
   cardDesc: { color: Colors.muted, fontFamily: FontFamily.body, fontSize: 12 },
+  cardMeta: { color: Colors.muted, fontFamily: FontFamily.bodyMedium, fontSize: 11 },
   pill: {
     backgroundColor: 'rgba(52, 211, 153, 0.12)',
     borderRadius: Radius.full,
