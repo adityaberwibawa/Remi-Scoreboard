@@ -10,12 +10,12 @@ interface Props {
   message: string;
   confirmLabel: string;
   destructive?: boolean;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   onCancel: () => void;
   children?: React.ReactNode;
 }
 
-/** Dialog konfirmasi: fokus modal, batal selalu tersedia. */
+/** Dialog konfirmasi: fokus modal, batal selalu tersedia, aman untuk aksi async. */
 export function ConfirmSheet({
   visible,
   title,
@@ -27,6 +27,17 @@ export function ConfirmSheet({
   children,
 }: Props) {
   const [busy, setBusy] = useState(false);
+
+  const handleConfirm = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await onConfirm();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Modal
       visible={visible}
@@ -36,7 +47,7 @@ export function ConfirmSheet({
       accessibilityViewIsModal>
       <Pressable
         accessibilityLabel="Tutup dialog"
-        onPress={onCancel}
+        onPress={busy ? undefined : onCancel}
         style={styles.overlay}>
         <Pressable
           accessibilityRole="alert"
@@ -56,21 +67,16 @@ export function ConfirmSheet({
           {children}
           <View style={styles.actions}>
             <View style={styles.action}>
-              <AppButton label="Batal" variant="ghost" onPress={onCancel} />
+              <AppButton label="Batal" variant="ghost" disabled={busy} onPress={onCancel} />
             </View>
             <View style={styles.action}>
               <AppButton
-                label={busy ? 'Memproses…' : confirmLabel}
+                label={confirmLabel}
                 variant={destructive ? 'danger' : 'primary'}
+                loading={busy}
+                loadingLabel="Memproses…"
                 disabled={busy}
-                onPress={() => {
-                  setBusy(true);
-                  try {
-                    onConfirm();
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
+                onPress={() => void handleConfirm()}
               />
             </View>
           </View>

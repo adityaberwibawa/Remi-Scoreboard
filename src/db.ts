@@ -22,12 +22,18 @@ let dbPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
 export function getDb(): Promise<SQLite.SQLiteDatabase> {
   if (!dbPromise) {
-    dbPromise = SQLite.openDatabaseAsync('pentungscore.db').then(async (db) => {
-      await db.execAsync('PRAGMA journal_mode = WAL;');
-      await db.execAsync('PRAGMA secure_delete = ON;');
-      await migrate(db);
-      return db;
-    });
+    dbPromise = SQLite.openDatabaseAsync('pentungscore.db')
+      .then(async (db) => {
+        await db.execAsync('PRAGMA journal_mode = WAL;');
+        await db.execAsync('PRAGMA secure_delete = ON;');
+        await migrate(db);
+        return db;
+      })
+      .catch((error: unknown) => {
+        // Jangan simpan promise yang sudah gagal: retry berikutnya harus membuka ulang DB.
+        dbPromise = null;
+        throw error;
+      });
   }
   return dbPromise;
 }
@@ -310,12 +316,18 @@ export async function deleteSessionRow(sessionId: string): Promise<void> {
 }
 
 /** Cache JSON daftar template terakhir agar bagian template tetap tampil offline. */
-export async function readTemplateCache(): Promise<string | null> {
+export interface TemplateCacheEntry {
+  payload: string;
+  updatedAt: string;
+}
+
+export async function readTemplateCache(): Promise<TemplateCacheEntry | null> {
   const db = await getDb();
-  const row = await db.getFirstAsync<{ payload: string }>(
-    'SELECT payload FROM template_cache WHERE id = 1',
+  const row = await db.getFirstAsync<{ payload: string; updated_at: string }>(
+    'SELECT payload, updated_at FROM template_cache WHERE id = 1',
   );
-  return row?.payload ?? null;
+  if (!row) return null;
+  return { payload: row.payload, updatedAt: row.updated_at };
 }
 
 export async function writeTemplateCache(payload: string): Promise<void> {

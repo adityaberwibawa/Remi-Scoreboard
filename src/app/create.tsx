@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,7 +13,9 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppButton } from '../components/AppButton';
 import { AppHeader } from '../components/AppHeader';
+import { DataErrorBanner } from '../components/DataErrorBanner';
 import { PlayerAvatar } from '../components/PlayerAvatar';
+import { StatusBanner } from '../components/StatusBanner';
 import { Colors, Common, FontFamily, MIN_TOUCH, Radius, Soft } from '../theme';
 import {
   MAX_NAME_LENGTH,
@@ -53,6 +54,9 @@ export default function CreateScreen() {
   const [title, setTitle] = useState(templateTitle);
   const [quickName, setQuickName] = useState('');
   const [quickError, setQuickError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [addingQuick, setAddingQuick] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [included, setIncluded] = useState<Record<string, boolean> | null>(null);
   const [dealerId, setDealerId] = useState<string | null>(null);
   const [targetEnabled, setTargetEnabled] = useState(defaultTargetEnabled);
@@ -77,21 +81,30 @@ export default function CreateScreen() {
   };
 
   const submitQuickAdd = async () => {
+    if (addingQuick) return;
     if (players.length >= MAX_PLAYERS) {
       setQuickError(`Maksimal ${MAX_PLAYERS} pemain dalam satu meja.`);
       return;
     }
-    const error = await addPlayer(quickName, { type: 'initials', colorStyle: 'emerald' });
-    if (error) {
-      setQuickError(error);
-      return;
+    setAddingQuick(true);
+    setActionError(null);
+    try {
+      const error = await addPlayer(quickName, { type: 'initials', colorStyle: 'emerald' });
+      if (error) {
+        setQuickError(error);
+        return;
+      }
+      setQuickName('');
+      setQuickError(null);
+    } finally {
+      setAddingQuick(false);
     }
-    setQuickName('');
-    setQuickError(null);
   };
 
   const start = async () => {
-    if (!canStart || targetError) return;
+    if (!canStart || targetError || starting) return;
+    setStarting(true);
+    setActionError(null);
     const { id, error } = await createSession({
       title: title.trim() || undefined,
       playerIds: readyIds,
@@ -99,7 +112,8 @@ export default function CreateScreen() {
       rules: { targetScoreEnabled: targetEnabled, targetScore: targetNum },
     });
     if (error || !id) {
-      Alert.alert('Belum bisa mulai', error ?? 'Coba lagi.');
+      setActionError(error ?? 'Gagal memulai permainan. Coba lagi.');
+      setStarting(false);
       return;
     }
     setTitle('');
@@ -110,6 +124,16 @@ export default function CreateScreen() {
   return (
     <View style={Common.screen}>
       <AppHeader title="Buat Permainan" subtitle="Atur meja & aturan skor" showBack />
+      <DataErrorBanner />
+      {actionError ? (
+        <StatusBanner
+          tone="error"
+          text={actionError}
+          actionLabel="Tutup"
+          onAction={() => setActionError(null)}
+          style={styles.banner}
+        />
+      ) : null}
       <ScrollView
         contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }]}
         keyboardShouldPersistTaps="handled">
@@ -158,7 +182,12 @@ export default function CreateScreen() {
               onSubmitEditing={submitQuickAdd}
               style={styles.quickInput}
             />
-            <AppButton label="Tambah" onPress={submitQuickAdd} />
+            <AppButton
+              label="Tambah"
+              onPress={submitQuickAdd}
+              loading={addingQuick}
+              loadingLabel="Menyimpan…"
+            />
           </View>
           {quickError ? (
             <Text accessibilityRole="alert" style={styles.error}>
@@ -298,6 +327,8 @@ export default function CreateScreen() {
           </View>
           <AppButton
             label="Mulai Permainan"
+            loading={starting}
+            loadingLabel="Memulai…"
             disabled={!canStart || !!targetError}
             disabledReason={
               !canStart ? `Pilih minimal ${templateMinPlayers} pemain yang ikut.` : 'Perbaiki target skor dulu.'
@@ -443,4 +474,5 @@ const styles = StyleSheet.create({
   readyRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 },
   readyText: { color: Colors.accent, fontFamily: FontFamily.bodySemi, fontSize: 14 },
   readyWarn: { color: Colors.danger },
+  banner: { marginHorizontal: 16, marginTop: 12 },
 });

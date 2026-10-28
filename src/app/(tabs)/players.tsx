@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,8 +13,10 @@ import { AppButton } from '../../components/AppButton';
 import { AppHeader } from '../../components/AppHeader';
 import { AvatarPicker } from '../../components/AvatarPicker';
 import { ConfirmSheet } from '../../components/ConfirmSheet';
+import { DataErrorBanner } from '../../components/DataErrorBanner';
 import { EmptyState } from '../../components/EmptyState';
 import { PlayerAvatar } from '../../components/PlayerAvatar';
+import { StatusBanner } from '../../components/StatusBanner';
 import { Colors, Common, FontFamily, MIN_TOUCH, Radius } from '../../theme';
 import { MAX_PLAYERS, MAX_NAME_LENGTH } from '../../scoring';
 import { useStore } from '../../store';
@@ -34,6 +35,8 @@ export default function PlayersScreen() {
 
   const [name, setName] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const [avatarDraft, setAvatarDraft] = useState<Avatar>({
     type: 'initials',
     colorStyle: 'emerald',
@@ -43,25 +46,41 @@ export default function PlayersScreen() {
   const [editName, setEditName] = useState('');
   const [deleting, setDeleting] = useState<Player | null>(null);
 
+  const runAction = (action: Promise<string | null>) => {
+    void action
+      .then((error) => {
+        if (error) setActionError(error);
+      })
+      .catch(() => setActionError('Terjadi kesalahan. Coba lagi.'));
+  };
+
   const submitAdd = async () => {
+    if (adding) return;
     if (players.length >= MAX_PLAYERS) {
       setFormError(`Maksimal ${MAX_PLAYERS} pemain dalam satu daftar.`);
       return;
     }
-    const error = await addPlayer(name, avatarDraft);
-    if (error) {
-      setFormError(error);
-      return;
+    setAdding(true);
+    setActionError(null);
+    try {
+      const error = await addPlayer(name, avatarDraft);
+      if (error) {
+        setFormError(error);
+        return;
+      }
+      setName('');
+      setFormError(null);
+    } finally {
+      setAdding(false);
     }
-    setName('');
-    setFormError(null);
   };
 
   const submitRename = async () => {
     if (!editing) return;
+    setActionError(null);
     const error = await renamePlayer(editing.id, editName);
     if (error) {
-      Alert.alert('Nama tidak valid', error);
+      setActionError(error);
       return;
     }
     setEditing(null);
@@ -69,14 +88,25 @@ export default function PlayersScreen() {
 
   const confirmDelete = async () => {
     if (!deleting) return;
+    setActionError(null);
     const error = await removePlayer(deleting.id);
     setDeleting(null);
-    if (error) Alert.alert('Tidak bisa menghapus', error);
+    if (error) setActionError(error);
   };
 
   return (
     <View style={Common.screen}>
       <AppHeader title="Kelola Pemain" subtitle={`${players.length} / ${MAX_PLAYERS} pemain`} />
+      <DataErrorBanner />
+      {actionError ? (
+        <StatusBanner
+          tone="error"
+          text={actionError}
+          actionLabel="Tutup"
+          onAction={() => setActionError(null)}
+          style={styles.banner}
+        />
+      ) : null}
       <ScrollView
         contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }]}
         keyboardShouldPersistTaps="handled">
@@ -116,7 +146,7 @@ export default function PlayersScreen() {
                 style={styles.input}
               />
               <View style={styles.addBtn}>
-                <AppButton label="Tambah" onPress={submitAdd} />
+                <AppButton label="Tambah" onPress={submitAdd} loading={adding} loadingLabel="Menyimpan…" />
               </View>
             </View>
             {formError ? (
@@ -152,7 +182,7 @@ export default function PlayersScreen() {
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={`Lambang ${player.name}: ${player.suit}. Ketuk untuk ganti.`}
-                    onPress={() => cycleSuit(player.id)}
+                    onPress={() => runAction(cycleSuit(player.id))}
                     style={styles.suit}>
                     <Text
                       style={[
@@ -175,7 +205,7 @@ export default function PlayersScreen() {
                             ? `${player.name} adalah dealer awal`
                             : `Jadikan ${player.name} dealer awal`
                         }
-                        onPress={() => setDealer(player.id)}
+                        onPress={() => runAction(setDealer(player.id))}
                         style={styles.dealerBtn}>
                         <MaterialIcons
                           name={player.isDealer ? 'stars' : 'radio-button-unchecked'}
@@ -196,7 +226,7 @@ export default function PlayersScreen() {
                       accessibilityRole="button"
                       accessibilityLabel={`Pindahkan ${player.name} naik`}
                       disabled={index === 0}
-                      onPress={() => movePlayer(player.id, -1)}
+                      onPress={() => runAction(movePlayer(player.id, -1))}
                       style={styles.iconBtn}>
                       <MaterialIcons
                         name="arrow-upward"
@@ -208,7 +238,7 @@ export default function PlayersScreen() {
                       accessibilityRole="button"
                       accessibilityLabel={`Pindahkan ${player.name} turun`}
                       disabled={index === players.length - 1}
-                      onPress={() => movePlayer(player.id, 1)}
+                      onPress={() => runAction(movePlayer(player.id, 1))}
                       style={styles.iconBtn}>
                       <MaterialIcons
                         name="arrow-downward"
@@ -220,6 +250,7 @@ export default function PlayersScreen() {
                       accessibilityRole="button"
                       accessibilityLabel={`Ubah nama ${player.name}`}
                       onPress={() => {
+                        setActionError(null);
                         setEditing(player);
                         setEditName(player.name);
                       }}
@@ -230,7 +261,10 @@ export default function PlayersScreen() {
                       accessibilityRole="button"
                       accessibilityLabel={`Hapus ${player.name}`}
                       accessibilityHint="Meminta konfirmasi sebelum menghapus"
-                      onPress={() => setDeleting(player)}
+                      onPress={() => {
+                        setActionError(null);
+                        setDeleting(player);
+                      }}
                       style={styles.iconBtn}>
                       <MaterialIcons name="delete-outline" size={18} color={Colors.muted} />
                     </Pressable>
@@ -254,9 +288,7 @@ export default function PlayersScreen() {
             if (pickerFor === 'new') {
               setAvatarDraft(avatar);
             } else if (pickerFor) {
-              updateAvatar(pickerFor, avatar).catch(() =>
-                Alert.alert('Gagal', 'Avatar gagal disimpan.'),
-              );
+              runAction(updateAvatar(pickerFor, avatar));
             }
             setPickerFor(null);
           }}
@@ -279,6 +311,7 @@ export default function PlayersScreen() {
           onSubmitEditing={submitRename}
           style={styles.input}
         />
+        {actionError ? <StatusBanner tone="error" text={actionError} /> : null}
       </ConfirmSheet>
       <ConfirmSheet
         visible={deleting !== null}
@@ -376,4 +409,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 8,
   },
+  banner: { marginHorizontal: 16, marginTop: 12 },
 });

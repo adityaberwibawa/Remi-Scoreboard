@@ -8,11 +8,20 @@
  * pemanggil otomatis memakai mock lokal.
  *
  * Offline-first: hasil terakhir disimpan di SQLite; bila jaringan gagal,
- * cache dipakai supaya bagian template tetap tampil.
+ * cache dipakai supaya bagian template tetap tampil. Cache hanya dipakai untuk
+ * gangguan sementara — error 4xx tetap dilaporkan agar konfigurasi/data salah
+ * tidak tersembunyi.
  */
 import { readTemplateCache, writeTemplateCache } from '../db';
 import { mapServerTemplateList } from './dto';
 import type { SessionTemplate } from './dto';
+import {
+  ApiError,
+  isAbortError,
+  isCacheFallbackError,
+  normalizeApiError,
+} from './errors';
+import { requestJson } from './http';
 import { MOCK_SERVER_TEMPLATES } from './mock';
 
 export interface FetchTemplatesOptions {
@@ -23,6 +32,20 @@ export interface FetchTemplatesOptions {
   signal?: AbortSignal;
 }
 
+export type TemplateSource = 'network' | 'cache' | 'mock';
+
+export interface FetchTemplatesResult {
+  templates: SessionTemplate[];
+  source: TemplateSource;
+  /** Waktu cache ditulis; hanya terisi saat source = "cache". */
+  cachedAt: string | null;
+}
+
+export interface CachedTemplates {
+  templates: SessionTemplate[];
+  cachedAt: string;
+}
+
 const MOCK_DELAY_MS = 400;
 
 /** Base URL backend dari env build-time (trailing slash dibuang). */
@@ -30,26 +53,41 @@ export const DEFAULT_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/+$/,
 /** Tanpa base URL → demo pakai mock lokal agar aplikasi tetap berfungsi. */
 export const DEFAULT_USE_MOCK = DEFAULT_BASE_URL === '';
 
+function assertValidBaseUrl(baseUrl: string): void {
+  if (!/^https:\/\//i.test(baseUrl) && !/^http:\/\/localhost(?::\d+)?$/i.test(baseUrl)) {
+    throw new ApiError({
+      kind: 'config',
+      message: 'URL backend tidak valid. Periksa EXPO_PUBLIC_API_URL.',
+    });
+  }
+}
+
 function delay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const t = setTimeout(() => resolve(), ms);
-    signal?.addEventListener(
-      'abort',
-      () => {
-        clearTimeout(t);
-        reject(new DOMException('Aborted', 'AbortError'));
-      },
-      { once: true },
-    );
+    if (signal?.aborted) {
+      reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 
-async function readCachedTemplates(): Promise<SessionTemplate[] | null> {
+/** Baca cache template tanpa menyentuh jaringan (dipakai untuk tampilan awal). */
+export async function readCachedTemplateList(): Promise<CachedTemplates | null> {
   try {
-    const raw = await readTemplateCache();
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? (parsed as SessionTemplate[]) : null;
+    const entry = await readTemplateCache();
+    if (!entry) return null;
+    const parsed = JSON.parse(entry.payload) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    return { templates: parsed as SessionTemplate[], cachedAt: entry.updatedAt };
   } catch {
     return null;
   }
@@ -69,41 +107,43 @@ async function saveTemplateCache(templates: SessionTemplate[]): Promise<void> {
  */
 export async function fetchSessionTemplates(
   options: FetchTemplatesOptions = {},
-): Promise<SessionTemplate[]> {
+): Promise<FetchTemplatesResult> {
   const { baseUrl = DEFAULT_BASE_URL, useMock = DEFAULT_USE_MOCK, signal } = options;
 
   if (useMock || !baseUrl) {
     await delay(MOCK_DELAY_MS, signal);
-    return mapServerTemplateList(MOCK_SERVER_TEMPLATES);
+    return {
+      templates: mapServerTemplateList(MOCK_SERVER_TEMPLATES),
+      source: 'mock',
+      cachedAt: null,
+    };
   }
 
-  let res: Response;
+  assertValidBaseUrl(baseUrl);
+
   try {
-    res = await fetch(`${baseUrl}/api/templates`, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      signal,
-    });
-  } catch (e) {
-    if (e instanceof DOMException && e.name === 'AbortError') throw e;
-    const cached = await readCachedTemplates();
-    if (cached) return cached;
-    throw new Error('Tidak dapat terhubung ke server. Periksa koneksi internet.');
+    const data = await requestJson<unknown>(
+      `${baseUrl}/api/templates`,
+      { method: 'GET', headers: { Accept: 'application/json' } },
+      { signal },
+    );
+    if (!Array.isArray(data)) {
+      throw new ApiError({ kind: 'parse', message: 'Respon server bukan daftar template.' });
+    }
+    const templates = mapServerTemplateList(data);
+    if (data.length > 0 && templates.length === 0) {
+      throw new ApiError({ kind: 'parse', message: 'Format template dari server tidak dikenali.' });
+    }
+    await saveTemplateCache(templates);
+    return { templates, source: 'network', cachedAt: null };
+  } catch (error) {
+    const apiError = normalizeApiError(error);
+    if (isAbortError(apiError)) throw apiError;
+    if (!isCacheFallbackError(apiError)) throw apiError;
+    const cached = await readCachedTemplateList();
+    if (cached) {
+      return { templates: cached.templates, source: 'cache', cachedAt: cached.cachedAt };
+    }
+    throw apiError;
   }
-  if (!res.ok) {
-    const cached = await readCachedTemplates();
-    if (cached) return cached;
-    throw new Error(`Server mengembalikan status ${res.status}. Coba lagi nanti.`);
-  }
-  let data: unknown;
-  try {
-    data = await res.json();
-  } catch {
-    const cached = await readCachedTemplates();
-    if (cached) return cached;
-    throw new Error('Respon server bukan JSON yang valid.');
-  }
-  const templates = mapServerTemplateList(data);
-  await saveTemplateCache(templates);
-  return templates;
 }

@@ -4,6 +4,7 @@ import { useCallback } from 'react';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppHeader } from '../../components/AppHeader';
+import { DataErrorBanner } from '../../components/DataErrorBanner';
 import { EmptyState } from '../../components/EmptyState';
 import { SessionCard } from '../../components/SessionCard';
 import { TemplateSection } from '../../components/TemplateSection';
@@ -16,7 +17,7 @@ export default function HomeScreen() {
   const players = useStore((s) => s.players);
   const sessions = useStore((s) => s.sessions);
   const loadAll = useStore((s) => s.loadAll);
-  const { templates, loading, error, retry } = useSessionTemplates();
+  const { templates, loading, refreshing, error, source, cachedAt, retry } = useSessionTemplates();
   const ongoing = sessions.find((s) => s.status === 'ongoing');
 
   useFocusEffect(
@@ -28,6 +29,7 @@ export default function HomeScreen() {
   return (
     <View style={Common.screen}>
       <AppHeader title="PentungScore" subtitle="Pencatat skor kartu" />
+      <DataErrorBanner />
       <ScrollView
         contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + 24 }]}>
         <View style={Common.content}>
@@ -70,7 +72,10 @@ export default function HomeScreen() {
           <TemplateSection
             templates={templates}
             loading={loading}
+            refreshing={refreshing}
             error={error}
+            source={source}
+            cachedAt={cachedAt}
             onRetry={retry}
             onSelect={(t) =>
               router.push({

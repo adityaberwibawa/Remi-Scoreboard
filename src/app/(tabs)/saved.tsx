@@ -1,12 +1,14 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Alert, FlatList, StyleSheet, TextInput, View } from 'react-native';
+import { FlatList, StyleSheet, TextInput, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppHeader } from '../../components/AppHeader';
 import { ConfirmSheet } from '../../components/ConfirmSheet';
+import { DataErrorBanner } from '../../components/DataErrorBanner';
 import { EmptyState } from '../../components/EmptyState';
 import { FilterTabs } from '../../components/FilterTabs';
 import { SessionCard } from '../../components/SessionCard';
+import { StatusBanner } from '../../components/StatusBanner';
 import { Colors, Common, MIN_TOUCH, Radius } from '../../theme';
 import { playerName, useStore } from '../../store';
 import type { GameSession } from '../../types';
@@ -21,6 +23,7 @@ export default function SavedScreen() {
   const deleteSession = useStore((s) => s.deleteSession);
   const [filter, setFilter] = useState<Filter>('all');
   const [query, setQuery] = useState('');
+  const [actionError, setActionError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<GameSession | null>(null);
 
   useFocusEffect(
@@ -28,6 +31,14 @@ export default function SavedScreen() {
       loadAll().catch(() => undefined);
     }, [loadAll]),
   );
+
+  const confirmDelete = async () => {
+    if (!deleting) return;
+    const id = deleting.id;
+    setDeleting(null);
+    const error = await deleteSession(id);
+    if (error) setActionError(error);
+  };
 
   const counts = useMemo(
     () => ({
@@ -56,6 +67,16 @@ export default function SavedScreen() {
         title="Game Tersimpan"
         subtitle={`${counts.all} riwayat sesi permainan`}
       />
+      <DataErrorBanner />
+      {actionError ? (
+        <StatusBanner
+          tone="error"
+          text={actionError}
+          actionLabel="Tutup"
+          onAction={() => setActionError(null)}
+          style={styles.banner}
+        />
+      ) : null}
       <View style={styles.searchWrap}>
         <View style={Common.content}>
           <TextInput
@@ -112,14 +133,7 @@ export default function SavedScreen() {
         confirmLabel="Hapus"
         destructive
         onCancel={() => setDeleting(null)}
-        onConfirm={() => {
-          if (deleting) {
-            deleteSession(deleting.id).catch(() =>
-              Alert.alert('Gagal', 'Sesi gagal dihapus.'),
-            );
-          }
-          setDeleting(null);
-        }}
+        onConfirm={confirmDelete}
       />
     </View>
   );
@@ -139,4 +153,5 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   list: { paddingHorizontal: 16, paddingTop: 12, gap: 12 },
+  banner: { marginHorizontal: 16, marginTop: 12 },
 });

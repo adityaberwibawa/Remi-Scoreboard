@@ -1,4 +1,6 @@
 import { deleteItem, getItem, setItem } from './secureStorage';
+import { ApiError, isSessionExpired } from '../api/errors';
+import { requestJson } from '../api/http';
 
 const TOKEN_KEY = 'pentung.auth.accountTokens';
 
@@ -23,24 +25,47 @@ export interface AccountSnapshot {
   updatedAt: string | null;
 }
 
-export class AccountApiError extends Error {
-  status: number;
+interface AccountApiOptions {
+  timeoutMs?: number;
+  retryBaseDelayMs?: number;
+}
 
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = 'AccountApiError';
-    this.status = status;
-  }
+function isAccountUser(value: unknown): value is AccountUser {
+  if (typeof value !== 'object' || value === null) return false;
+  const user = value as Record<string, unknown>;
+  return (
+    typeof user.id === 'string' &&
+    typeof user.name === 'string' &&
+    typeof user.email === 'string'
+  );
+}
+
+function isAccountTokens(value: unknown): value is AccountTokens {
+  if (typeof value !== 'object' || value === null) return false;
+  const tokens = value as Record<string, unknown>;
+  return (
+    isAccountUser(tokens.user) &&
+    typeof tokens.accessToken === 'string' &&
+    typeof tokens.refreshToken === 'string'
+  );
 }
 
 export class AccountApi {
   private readonly baseUrl: string;
+  private readonly timeoutMs: number;
+  private readonly retryBaseDelayMs: number;
+  private refreshPromise: Promise<AccountTokens> | null = null;
 
-  constructor(baseUrl: string) {
+  constructor(baseUrl: string, options: AccountApiOptions = {}) {
     this.baseUrl = baseUrl.replace(/\/$/, '');
     if (!/^https:\/\//i.test(this.baseUrl) && !/^http:\/\/localhost(?::\d+)?$/i.test(this.baseUrl)) {
-      throw new Error('URL backend harus memakai HTTPS (kecuali localhost untuk development).');
+      throw new ApiError({
+        kind: 'config',
+        message: 'URL backend harus memakai HTTPS (kecuali localhost untuk development).',
+      });
     }
+    this.timeoutMs = options.timeoutMs ?? 12_000;
+    this.retryBaseDelayMs = options.retryBaseDelayMs ?? 500;
   }
 
   async register(name: string, email: string, password: string): Promise<AccountTokens> {
@@ -63,12 +88,19 @@ export class AccountApi {
 
   async me(): Promise<AccountUser> {
     const result = await this.authorizedRequest<{ user: AccountUser }>('/api/me');
+    await this.updateCachedUser(result.user);
     return result.user;
   }
 
   /** Apakah perangkat ini sudah punya sesi akun tersimpan (tanpa memanggil jaringan). */
   async hasSession(): Promise<boolean> {
     return (await this.readTokens()) !== null;
+  }
+
+  /** Profil terakhir yang tersimpan; berguna saat offline. */
+  async getCachedUser(): Promise<AccountUser | null> {
+    const tokens = await this.readTokens();
+    return tokens?.user ?? null;
   }
 
   /** Profil akun yang sedang login; refresh token otomatis bila access token habis. */
@@ -90,17 +122,20 @@ export class AccountApi {
     return result.updatedAt;
   }
 
-  async logout(): Promise<void> {
+  /** Keluar secara lokal; panggilan server dilewati bila `remote: false` (mis. offline). */
+  async logout(options: { remote?: boolean } = {}): Promise<void> {
     const tokens = await this.readTokens();
     try {
-      if (tokens) {
+      if (tokens && options.remote !== false) {
         await this.request('/api/auth/logout', {
           method: 'POST',
           body: JSON.stringify({ refreshToken: tokens.refreshToken }),
         });
       }
+    } catch {
+      // Keluar harus tetap berhasil secara lokal walau server tidak terjangkau.
     } finally {
-      await deleteItem(TOKEN_KEY);
+      await this.clearSession();
     }
   }
 
@@ -113,10 +148,26 @@ export class AccountApi {
     return result;
   }
 
+  /** Satu refresh untuk banyak request 401 yang bersamaan (refresh token dirotasi server). */
+  private refreshOnce(refreshToken: string): Promise<AccountTokens> {
+    if (!this.refreshPromise) {
+      this.refreshPromise = this.refresh(refreshToken).finally(() => {
+        this.refreshPromise = null;
+      });
+    }
+    return this.refreshPromise;
+  }
+
   /** Request dengan Bearer token; sekali refresh otomatis bila server menjawab 401. */
   private async authorizedRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
     const tokens = await this.readTokens();
-    if (!tokens) throw new AccountApiError('Silakan login terlebih dahulu.', 401);
+    if (!tokens) {
+      throw new ApiError({
+        kind: 'http',
+        status: 401,
+        message: 'Silakan login terlebih dahulu.',
+      });
+    }
     const withAuth = (accessToken: string): RequestInit => ({
       ...init,
       headers: { ...init.headers, Authorization: `Bearer ${accessToken}` },
@@ -124,14 +175,19 @@ export class AccountApi {
     try {
       return await this.request<T>(path, withAuth(tokens.accessToken));
     } catch (error) {
-      if (!(error instanceof AccountApiError) || error.status !== 401) throw error;
+      if (!isSessionExpired(error)) throw error;
+
+      // Request lain mungkin sudah lebih dulu memperbarui token.
+      const latest = await this.readTokens();
+      if (latest && latest.accessToken !== tokens.accessToken) {
+        return this.request<T>(path, withAuth(latest.accessToken));
+      }
+
       let fresh: AccountTokens;
       try {
-        fresh = await this.refresh(tokens.refreshToken);
+        fresh = await this.refreshOnce(tokens.refreshToken);
       } catch (refreshError) {
-        if (refreshError instanceof AccountApiError && refreshError.status === 401) {
-          await deleteItem(TOKEN_KEY);
-        }
+        if (isSessionExpired(refreshError)) await this.clearSession();
         throw refreshError;
       }
       return this.request<T>(path, withAuth(fresh.accessToken));
@@ -142,9 +198,14 @@ export class AccountApi {
     const raw = await getItem(TOKEN_KEY);
     if (!raw) return null;
     try {
-      return JSON.parse(raw) as AccountTokens;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!isAccountTokens(parsed)) {
+        await this.clearSession();
+        return null;
+      }
+      return parsed;
     } catch {
-      await deleteItem(TOKEN_KEY);
+      await this.clearSession();
       return null;
     }
   }
@@ -153,33 +214,27 @@ export class AccountApi {
     await setItem(TOKEN_KEY, JSON.stringify(tokens));
   }
 
+  private async updateCachedUser(user: AccountUser): Promise<void> {
+    const tokens = await this.readTokens();
+    if (tokens) await this.saveTokens({ ...tokens, user });
+  }
+
+  private async clearSession(): Promise<void> {
+    await deleteItem(TOKEN_KEY);
+  }
+
   private async request<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
-    let response: Response;
-    try {
-      response = await fetch(`${this.baseUrl}${path}`, {
+    return requestJson<T>(
+      `${this.baseUrl}${path}`,
+      {
         ...init,
         headers: {
           Accept: 'application/json',
           ...(init.body ? { 'Content-Type': 'application/json' } : {}),
           ...init.headers,
         },
-      });
-    } catch {
-      throw new AccountApiError('Tidak dapat terhubung ke server. Periksa koneksi internet.', 0);
-    }
-
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
-      body = null;
-    }
-    if (!response.ok) {
-      const message = typeof body === 'object' && body !== null && 'error' in body && typeof body.error === 'string'
-        ? body.error
-        : `Server mengembalikan status ${response.status}.`;
-      throw new AccountApiError(message, response.status);
-    }
-    return body as T;
+      },
+      { timeoutMs: this.timeoutMs, retryBaseDelayMs: this.retryBaseDelayMs },
+    );
   }
 }
