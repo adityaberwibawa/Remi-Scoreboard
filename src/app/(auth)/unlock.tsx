@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { AppButton } from '../../components/AppButton';
 import { AppHeader } from '../../components/AppHeader';
+import { ConfirmSheet } from '../../components/ConfirmSheet';
 import { Colors, Common, FontFamily, MIN_TOUCH, Radius } from '../../theme';
 import { MAX_ATTEMPTS, PIN_LENGTH, remainingLockoutMs } from '../../auth/pin';
 import { useAuth } from '../../auth/useAuth';
@@ -20,6 +21,7 @@ export default function UnlockScreen() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(BOOT_NOW);
+  const [confirmReset, setConfirmReset] = useState(false);
 
   useEffect(() => {
     if (!lockUntil) return;
@@ -55,22 +57,7 @@ export default function UnlockScreen() {
     }
   };
 
-  const askReset = () => {
-    Alert.alert(
-      'Reset kunci?',
-      'PIN di perangkat ini akan dihapus dan kamu diminta buat PIN baru. Data permainan tetap ada.',
-      [
-        { text: 'Batal', style: 'cancel' },
-        {
-          text: 'Reset',
-          style: 'destructive',
-          onPress: async () => {
-            await resetAppAuth();
-          },
-        },
-      ],
-    );
-  };
+  const askReset = () => setConfirmReset(true);
 
   return (
     <View style={Common.screen}>
@@ -116,6 +103,18 @@ export default function UnlockScreen() {
           <AppButton label="Lupa PIN? Reset kunci" variant="ghost" onPress={askReset} />
         </View>
       </View>
+      <ConfirmSheet
+        visible={confirmReset}
+        title="Reset kunci?"
+        message="PIN di perangkat ini akan dihapus dan kamu diminta buat PIN baru. Data permainan tetap ada."
+        confirmLabel="Reset"
+        destructive
+        onCancel={() => setConfirmReset(false)}
+        onConfirm={async () => {
+          setConfirmReset(false);
+          await resetAppAuth();
+        }}
+      />
     </View>
   );
 }

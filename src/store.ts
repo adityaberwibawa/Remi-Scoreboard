@@ -34,28 +34,30 @@ interface CreateSessionInput {
 
 interface PentungState {
   ready: boolean;
+  /** True setelah data lokal pernah berhasil dimuat minimal sekali. */
+  hasLoadedOnce: boolean;
   loadError: string | null;
   players: Player[];
   sessions: GameSession[];
   loadAll: () => Promise<void>;
   addPlayer: (name: string, avatar: Avatar) => Promise<string | null>;
   renamePlayer: (id: string, name: string) => Promise<string | null>;
-  updateAvatar: (id: string, avatar: Avatar) => Promise<void>;
-  cycleSuit: (id: string) => Promise<void>;
-  setDealer: (id: string) => Promise<void>;
+  updateAvatar: (id: string, avatar: Avatar) => Promise<string | null>;
+  cycleSuit: (id: string) => Promise<string | null>;
+  setDealer: (id: string) => Promise<string | null>;
   removePlayer: (id: string) => Promise<string | null>;
-  movePlayer: (id: string, direction: -1 | 1) => Promise<void>;
+  movePlayer: (id: string, direction: -1 | 1) => Promise<string | null>;
   createSession: (input: CreateSessionInput) => Promise<{ id?: string; error?: string }>;
-  renameSession: (id: string, title: string) => Promise<void>;
+  renameSession: (id: string, title: string) => Promise<string | null>;
   saveRound: (
     sessionId: string,
     scores: Record<string, number>,
     editRoundNumber?: number,
-  ) => Promise<{ completed: boolean; winnerName?: string }>;
-  undoLastRound: (sessionId: string) => Promise<boolean>;
-  deleteSession: (sessionId: string) => Promise<void>;
+  ) => Promise<{ completed: boolean; winnerName?: string; error?: string }>;
+  undoLastRound: (sessionId: string) => Promise<{ undone: boolean; error?: string }>;
+  deleteSession: (sessionId: string) => Promise<string | null>;
   /** Ganti seluruh data lokal dengan snapshot cloud (pulihkan cadangan). */
-  applySnapshot: (players: Player[], sessions: GameSession[]) => Promise<void>;
+  applySnapshot: (players: Player[], sessions: GameSession[]) => Promise<string | null>;
 }
 
 function suitForSeat(seatIndex: number): Suit {
@@ -64,6 +66,7 @@ function suitForSeat(seatIndex: number): Suit {
 
 export const useStore = create<PentungState>((set, get) => ({
   ready: false,
+  hasLoadedOnce: false,
   loadError: null,
   players: [],
   sessions: [],
@@ -72,9 +75,9 @@ export const useStore = create<PentungState>((set, get) => ({
     try {
       await getDb();
       const [players, sessions] = await Promise.all([fetchPlayers(), fetchSessions()]);
-      set({ players, sessions, ready: true, loadError: null });
+      set({ players, sessions, ready: true, hasLoadedOnce: true, loadError: null });
     } catch {
-      set({ ready: true, loadError: 'Gagal memuat data tersimpan.' });
+      set({ ready: true, loadError: 'Gagal memuat data tersimpan. Coba lagi.' });
     }
   },
 
@@ -92,7 +95,11 @@ export const useStore = create<PentungState>((set, get) => ({
       isDealer: players.length === 0,
       createdAt: new Date().toISOString(),
     };
-    await insertPlayer(player);
+    try {
+      await insertPlayer(player);
+    } catch {
+      return 'Gagal menambah pemain. Coba lagi.';
+    }
     set({ players: [...get().players, player] });
     return null;
   },
@@ -103,7 +110,11 @@ export const useStore = create<PentungState>((set, get) => ({
     if (error) return error;
     const updated = players.map((p) => (p.id === id ? { ...p, name: name.trim() } : p));
     const target = updated.find((p) => p.id === id);
-    if (target) await updatePlayer(target);
+    try {
+      if (target) await updatePlayer(target);
+    } catch {
+      return 'Gagal mengganti nama pemain. Coba lagi.';
+    }
     set({ players: updated });
     return null;
   },
@@ -111,8 +122,13 @@ export const useStore = create<PentungState>((set, get) => ({
   updateAvatar: async (id, avatar) => {
     const updated = get().players.map((p) => (p.id === id ? { ...p, avatar } : p));
     const target = updated.find((p) => p.id === id);
-    if (target) await updatePlayer(target);
+    try {
+      if (target) await updatePlayer(target);
+    } catch {
+      return 'Gagal menyimpan avatar. Coba lagi.';
+    }
     set({ players: updated });
+    return null;
   },
 
   cycleSuit: async (id) => {
@@ -123,13 +139,23 @@ export const useStore = create<PentungState>((set, get) => ({
       return { ...p, suit: next };
     });
     const target = updated.find((p) => p.id === id);
-    if (target) await updatePlayer(target);
+    try {
+      if (target) await updatePlayer(target);
+    } catch {
+      return 'Gagal mengganti simbol pemain. Coba lagi.';
+    }
     set({ players: updated });
+    return null;
   },
 
   setDealer: async (id) => {
-    await clearDealerExcept(id);
+    try {
+      await clearDealerExcept(id);
+    } catch {
+      return 'Gagal menetapkan dealer. Coba lagi.';
+    }
     set({ players: get().players.map((p) => ({ ...p, isDealer: p.id === id })) });
+    return null;
   },
 
   removePlayer: async (id) => {
@@ -138,11 +164,16 @@ export const useStore = create<PentungState>((set, get) => ({
       (s) => s.status === 'ongoing' && s.participants.some((p) => p.playerId === id),
     );
     if (inOngoing) return 'Pemain ini ikut game yang sedang berjalan.';
-    await deletePlayerRow(id);
     const remaining = players.filter((p) => p.id !== id);
-    if (remaining.length > 0 && !remaining.some((p) => p.isDealer)) {
+    const needsNewDealer = remaining.length > 0 && !remaining.some((p) => p.isDealer);
+    if (needsNewDealer) {
       remaining[0] = { ...remaining[0], isDealer: true };
-      await updatePlayer(remaining[0]);
+    }
+    try {
+      await deletePlayerRow(id);
+      if (needsNewDealer) await updatePlayer(remaining[0]);
+    } catch {
+      return 'Gagal menghapus pemain. Coba lagi.';
     }
     set({ players: remaining });
     return null;
@@ -153,9 +184,10 @@ export const useStore = create<PentungState>((set, get) => ({
     const players = [...get().players];
     const index = players.findIndex((p) => p.id === id);
     const swapWith = index + direction;
-    if (index < 0 || swapWith < 0 || swapWith >= players.length) return;
+    if (index < 0 || swapWith < 0 || swapWith >= players.length) return null;
     [players[index], players[swapWith]] = [players[swapWith], players[index]];
     set({ players });
+    return null;
   },
 
   createSession: async (input) => {
@@ -181,89 +213,118 @@ export const useStore = create<PentungState>((set, get) => ({
       rules: input.rules,
       rounds: [],
     };
-    await insertSession(session);
+    try {
+      await insertSession(session);
+    } catch {
+      return { error: 'Gagal menyimpan sesi baru. Coba lagi.' };
+    }
     set({ sessions: [session, ...get().sessions] });
     return { id: session.id };
   },
 
   renameSession: async (id, title) => {
     const clean = title.trim();
-    if (!clean) return;
+    if (!clean) return null;
     const sessions = get().sessions.map((s) => (s.id === id ? { ...s, title: clean } : s));
     const target = sessions.find((s) => s.id === id);
-    if (target) await updateSessionMeta(target);
+    try {
+      if (target) await updateSessionMeta(target);
+    } catch {
+      return 'Gagal mengganti nama sesi. Coba lagi.';
+    }
     set({ sessions });
+    return null;
   },
 
   saveRound: async (sessionId, scores, editRoundNumber) => {
     const { sessions, players } = get();
     const session = sessions.find((s) => s.id === sessionId);
     if (!session || session.status !== 'ongoing') return { completed: false };
-    let rounds = session.rounds;
-    if (editRoundNumber != null) {
-      rounds = rounds.map((r) =>
-        r.roundNumber === editRoundNumber ? { ...r, scores: { ...r.scores, ...scores } } : r,
-      );
-      await updateRound(sessionId, editRoundNumber, {
-        ...session.rounds.find((r) => r.roundNumber === editRoundNumber)?.scores,
-        ...scores,
-      });
-    } else {
-      const roundNumber = rounds.length + 1;
-      rounds = [...rounds, { roundNumber, scores }];
-      await insertRound(sessionId, roundNumber, scores);
-    }
-    let updated: GameSession = { ...session, rounds };
-    const winnerId = checkTargetReached(updated);
-    if (winnerId) {
-      updated = { ...updated, status: 'completed', winnerPlayerId: winnerId };
-      const winner = players.find((p) => p.id === winnerId);
-      const touched = new Set(Object.keys(scores));
-      const withStats = players.map((p) => {
-        if (!touched.has(p.id)) return p;
-        return {
-          ...p,
-          gamesPlayed: p.gamesPlayed + 1,
-          wins: p.id === winnerId ? p.wins + 1 : p.wins,
-        };
-      });
-      for (const p of withStats) {
-        const before = players.find((b) => b.id === p.id);
-        if (before && (before.gamesPlayed !== p.gamesPlayed || before.wins !== p.wins)) {
-          await updatePlayer(p);
+    try {
+      let rounds = session.rounds;
+      if (editRoundNumber != null) {
+        rounds = rounds.map((r) =>
+          r.roundNumber === editRoundNumber ? { ...r, scores: { ...r.scores, ...scores } } : r,
+        );
+        await updateRound(sessionId, editRoundNumber, {
+          ...session.rounds.find((r) => r.roundNumber === editRoundNumber)?.scores,
+          ...scores,
+        });
+      } else {
+        const roundNumber = rounds.length + 1;
+        rounds = [...rounds, { roundNumber, scores }];
+        await insertRound(sessionId, roundNumber, scores);
+      }
+      let updated: GameSession = { ...session, rounds };
+      const winnerId = checkTargetReached(updated);
+      if (winnerId) {
+        updated = { ...updated, status: 'completed', winnerPlayerId: winnerId };
+        const winner = players.find((p) => p.id === winnerId);
+        const touched = new Set(Object.keys(scores));
+        const withStats = players.map((p) => {
+          if (!touched.has(p.id)) return p;
+          return {
+            ...p,
+            gamesPlayed: p.gamesPlayed + 1,
+            wins: p.id === winnerId ? p.wins + 1 : p.wins,
+          };
+        });
+        for (const p of withStats) {
+          const before = players.find((b) => b.id === p.id);
+          if (before && (before.gamesPlayed !== p.gamesPlayed || before.wins !== p.wins)) {
+            await updatePlayer(p);
+          }
         }
+        await updateSessionMeta(updated);
+        set({
+          players: withStats,
+          sessions: get().sessions.map((s) => (s.id === sessionId ? updated : s)),
+        });
+        return { completed: true, winnerName: winner?.name };
       }
       await updateSessionMeta(updated);
-      set({
-        players: withStats,
-        sessions: get().sessions.map((s) => (s.id === sessionId ? updated : s)),
-      });
-      return { completed: true, winnerName: winner?.name };
+      set({ sessions: get().sessions.map((s) => (s.id === sessionId ? updated : s)) });
+      return { completed: false };
+    } catch {
+      return { completed: false, error: 'Gagal menyimpan ronde. Coba lagi.' };
     }
-    await updateSessionMeta(updated);
-    set({ sessions: get().sessions.map((s) => (s.id === sessionId ? updated : s)) });
-    return { completed: false };
   },
 
   undoLastRound: async (sessionId) => {
     const { sessions } = get();
     const session = sessions.find((s) => s.id === sessionId);
-    if (!session || session.rounds.length === 0 || session.status !== 'ongoing') return false;
+    if (!session || session.rounds.length === 0 || session.status !== 'ongoing') {
+      return { undone: false };
+    }
     const last = session.rounds[session.rounds.length - 1];
-    await deleteLastRound(sessionId, last.roundNumber);
+    try {
+      await deleteLastRound(sessionId, last.roundNumber);
+    } catch {
+      return { undone: false, error: 'Gagal menghapus ronde terakhir. Coba lagi.' };
+    }
     const updated: GameSession = { ...session, rounds: session.rounds.slice(0, -1) };
     set({ sessions: sessions.map((s) => (s.id === sessionId ? updated : s)) });
-    return true;
+    return { undone: true };
   },
 
   deleteSession: async (sessionId) => {
-    await deleteSessionRow(sessionId);
+    try {
+      await deleteSessionRow(sessionId);
+    } catch {
+      return 'Gagal menghapus sesi. Coba lagi.';
+    }
     set({ sessions: get().sessions.filter((s) => s.id !== sessionId) });
+    return null;
   },
 
   applySnapshot: async (players, sessions) => {
-    await replaceAllData(players, sessions);
+    try {
+      await replaceAllData(players, sessions);
+    } catch {
+      return 'Gagal memulihkan cadangan. Data lokal tidak diubah.';
+    }
     set({ players, sessions, loadError: null });
+    return null;
   },
 }));
 

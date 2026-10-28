@@ -1,6 +1,5 @@
 import { useMemo, useRef, useState, useCallback } from 'react';
 import {
-  Alert,
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -18,6 +17,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppButton } from '../../components/AppButton';
 import { AppHeader } from '../../components/AppHeader';
 import { ConfirmSheet } from '../../components/ConfirmSheet';
+import { DataErrorBanner } from '../../components/DataErrorBanner';
 import { EmptyState } from '../../components/EmptyState';
 import { PlayerAvatar } from '../../components/PlayerAvatar';
 import { RankingModal } from '../../components/RankingModal';
@@ -55,7 +55,9 @@ export default function GameScreen() {
   const [confirmUndo, setConfirmUndo] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [winner, setWinner] = useState<string | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ text: string; tone: 'success' | 'error' } | null>(null);
+  const [savingRound, setSavingRound] = useState(false);
+  const [undoing, setUndoing] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const labelScroll = useRef<ScrollViewInstance>(null);
   const { width: windowWidth } = useWindowDimensions();
@@ -85,8 +87,8 @@ export default function GameScreen() {
   const leadPlayer = lead ? players.find((p) => p.id === lead.playerId) : undefined;
   const ongoing = session?.status === 'ongoing';
 
-  const announce = (message: string) => {
-    setToast(message);
+  const announce = (message: string, tone: 'success' | 'error' = 'success') => {
+    setToast({ text: message, tone });
     if (toastTimer.current) clearTimeout(toastTimer.current);
     toastTimer.current = setTimeout(() => setToast(null), 3000);
   };
@@ -128,24 +130,47 @@ export default function GameScreen() {
     setEditTarget({ roundNumber, playerId });
 
   const handleSaveScores = async (scores: Record<string, number>) => {
-    if (!editTarget) return;
+    if (!editTarget || savingRound) return;
+    setSavingRound(true);
     const res = await saveRound(session.id, scores, editTarget.roundNumber ?? undefined);
+    setSavingRound(false);
+    if (res.error) {
+      announce(res.error, 'error');
+      return;
+    }
     setEditTarget(null);
     if (res.completed) {
       setWinner(res.winnerName ?? 'Pemenang');
     } else {
       announce(
         editTarget.roundNumber == null
-          ? 'Skor ronde berhasil diperbarui.'
+          ? 'Skor ronde berhasil disimpan.'
           : 'Skor berhasil diubah.',
       );
     }
   };
 
   const handleUndo = async () => {
+    if (undoing) return;
     setConfirmUndo(false);
-    const ok = await undoLastRound(session.id);
-    announce(ok ? 'Ronde terakhir dihapus.' : 'Tidak ada ronde untuk dihapus.');
+    setUndoing(true);
+    const res = await undoLastRound(session.id);
+    setUndoing(false);
+    if (res.error) {
+      announce(res.error, 'error');
+      return;
+    }
+    announce(res.undone ? 'Ronde terakhir dihapus.' : 'Tidak ada ronde untuk dihapus.');
+  };
+
+  const handleDeleteSession = async () => {
+    setConfirmDelete(false);
+    const error = await deleteSession(session.id);
+    if (error) {
+      announce(error, 'error');
+      return;
+    }
+    router.replace('/(tabs)/saved');
   };
 
   const modalPlayers =
@@ -199,6 +224,7 @@ export default function GameScreen() {
           ) : undefined
         }
       />
+      <DataErrorBanner />
       {session.status === 'completed' && session.winnerPlayerId ? (
         <View
           accessible
@@ -385,8 +411,14 @@ export default function GameScreen() {
       </View>
       {toast ? (
         <View accessibilityLiveRegion="polite" style={styles.toastWrap}>
-          <MaterialIcons name="check-circle" size={16} color={Colors.accent} />
-          <Text style={styles.toastText}>{toast}</Text>
+          <MaterialIcons
+            name={toast.tone === 'error' ? 'error-outline' : 'check-circle'}
+            size={16}
+            color={toast.tone === 'error' ? Colors.danger : Colors.accent}
+          />
+          <Text style={[styles.toastText, toast.tone === 'error' && styles.toastErrorText]}>
+            {toast.text}
+          </Text>
         </View>
       ) : null}
       <View style={[styles.bottomBar, { paddingBottom: insets.bottom + 8 }]}>
@@ -425,8 +457,11 @@ export default function GameScreen() {
           subtitle={editRoundLabel}
           players={modalPlayers}
           saveLabel={editTarget.roundNumber == null ? 'Simpan Skor Ronde' : 'Simpan Perubahan'}
+          saving={savingRound}
           onSave={handleSaveScores}
-          onClose={() => setEditTarget(null)}
+          onClose={() => {
+            if (!savingRound) setEditTarget(null);
+          }}
         />
       ) : null}
       <RankingModal
@@ -525,12 +560,7 @@ export default function GameScreen() {
         confirmLabel="Hapus Sesi"
         destructive
         onCancel={() => setConfirmDelete(false)}
-        onConfirm={() => {
-          setConfirmDelete(false);
-          deleteSession(session.id)
-            .then(() => router.replace('/(tabs)/saved'))
-            .catch(() => Alert.alert('Gagal', 'Sesi gagal dihapus.'));
-        }}
+        onConfirm={handleDeleteSession}
       />
       <Modal
         visible={winner !== null}
@@ -832,6 +862,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     flexShrink: 1,
   },
+  toastErrorText: { color: Colors.danger },
   bottomBar: {
     flexDirection: 'row',
     alignItems: 'center',
