@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -14,16 +13,23 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DEFAULT_BASE_URL } from '../../api/client';
-import { AccountApi, AccountApiError } from '../../auth/accountApi';
+import { apiErrorMessage, isSessionExpired, normalizeApiError } from '../../api/errors';
+import { AccountApi } from '../../auth/accountApi';
 import type { AccountUser } from '../../auth/accountApi';
 import { AppButton } from '../../components/AppButton';
 import { AppHeader } from '../../components/AppHeader';
+import { ConfirmSheet } from '../../components/ConfirmSheet';
+import { StatusBanner } from '../../components/StatusBanner';
+import { useNetworkStatus } from '../../hooks/useNetworkStatus';
 import { parseSnapshot } from '../../sync/snapshot';
 import type { Snapshot } from '../../sync/snapshot';
 import { Colors, Common, FontFamily, MIN_TOUCH, Radius, Soft } from '../../theme';
 import { useStore } from '../../store';
 
 type Mode = 'login' | 'register';
+type BootState = 'checking' | 'ready' | 'blocked';
+type BusyAction = 'auth' | 'logout' | 'backup' | 'restore' | null;
+type ConfirmAction = 'logout' | 'backup' | 'restore' | 'applyRestore' | null;
 
 /** Instance API akun; null bila build tidak punya URL backend yang valid. */
 const ACCOUNT_API = (() => {
@@ -35,11 +41,6 @@ const ACCOUNT_API = (() => {
   }
 })();
 
-function messageOf(error: unknown): string {
-  if (error instanceof AccountApiError || error instanceof Error) return error.message;
-  return 'Terjadi kesalahan. Coba lagi.';
-}
-
 function formatDate(iso: string | null): string {
   if (!iso) return '';
   const date = new Date(iso);
@@ -50,61 +51,112 @@ function formatDate(iso: string | null): string {
 /** Tab Akun: login/daftar, profil, serta cadangkan & pulihkan snapshot cloud. */
 export default function AccountScreen() {
   const insets = useSafeAreaInsets();
+  const network = useNetworkStatus();
+  const offline = network === 'offline';
   const players = useStore((s) => s.players);
   const sessions = useStore((s) => s.sessions);
   const applySnapshot = useStore((s) => s.applySnapshot);
 
   const [bootAttempt, setBootAttempt] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [boot, setBoot] = useState<BootState>('checking');
   const [user, setUser] = useState<AccountUser | null>(null);
+  const [bootNotice, setBootNotice] = useState<{ tone: 'offline' | 'info'; text: string } | null>(null);
   const [mode, setMode] = useState<Mode>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmAction>(null);
+  const [pendingRestore, setPendingRestore] = useState<{
+    snapshot: Snapshot;
+    updatedAt: string | null;
+  } | null>(null);
+
+  const busy = busyAction !== null;
 
   useEffect(() => {
     let alive = true;
     async function run() {
       if (!ACCOUNT_API) {
-        if (alive) setLoading(false);
+        if (alive) setBoot('ready');
         return;
       }
       try {
         const signedIn = await ACCOUNT_API.hasSession();
+        if (!alive) return;
         if (!signedIn) {
-          if (alive) setLoading(false);
+          setUser(null);
+          setBoot('ready');
+          return;
+        }
+        // Saat sudah diketahui offline, jangan tunggu timeout jaringan.
+        if (offline) {
+          const cached = await ACCOUNT_API.getCachedUser().catch(() => null);
+          if (!alive) return;
+          if (cached) {
+            setUser(cached);
+            setBoot('ready');
+            setBootNotice({
+              tone: 'offline',
+              text: 'Mode offline — menampilkan profil akun tersimpan. Cadangan cloud butuh internet.',
+            });
+          } else {
+            setBoot('blocked');
+            setError('Profil akun belum bisa dimuat. Sambungkan internet lalu coba lagi.');
+          }
           return;
         }
         const profile = await ACCOUNT_API.currentUser();
-        if (alive) {
-          setUser(profile);
-          setLoading(false);
-        }
+        if (!alive) return;
+        setUser(profile);
+        setBoot('ready');
+        setBootNotice(null);
       } catch (e) {
-        if (alive) {
-          setError(messageOf(e));
-          setLoading(false);
+        if (!alive) return;
+        const apiError = normalizeApiError(e);
+        if (isSessionExpired(apiError)) {
+          setUser(null);
+          setBoot('ready');
+          setNotice('Sesi sudah berakhir. Silakan masuk kembali.');
+          return;
         }
+        const cached = await ACCOUNT_API.getCachedUser().catch(() => null);
+        if (!alive) return;
+        if (cached) {
+          setUser(cached);
+          setBoot('ready');
+          setBootNotice({
+            tone: apiError.kind === 'offline' || apiError.kind === 'timeout' ? 'offline' : 'info',
+            text:
+              apiError.kind === 'offline' || apiError.kind === 'timeout'
+                ? 'Mode offline — menampilkan profil akun tersimpan. Cadangan cloud butuh internet.'
+                : 'Gagal memperbarui profil. Menampilkan profil terakhir yang tersimpan.',
+          });
+          return;
+        }
+        setBoot('blocked');
+        setError(apiErrorMessage(apiError, 'Gagal memuat profil akun.'));
       }
     }
     void run();
     return () => {
       alive = false;
     };
-  }, [bootAttempt]);
+  }, [bootAttempt, offline]);
 
   const retryBoot = () => {
-    setLoading(true);
+    setBoot('checking');
     setError(null);
+    setNotice(null);
+    setBootNotice(null);
     setBootAttempt((n) => n + 1);
   };
 
   const submitAuth = async () => {
-    if (!ACCOUNT_API || busy) return;
+    if (!ACCOUNT_API || busy || offline) return;
     const cleanName = name.trim();
     const cleanEmail = email.trim().toLowerCase();
     if (mode === 'register' && (cleanName.length < 2 || cleanName.length > 80)) {
@@ -124,7 +176,7 @@ export default function AccountScreen() {
       return;
     }
 
-    setBusy(true);
+    setBusyAction('auth');
     setError(null);
     setNotice(null);
     try {
@@ -133,6 +185,8 @@ export default function AccountScreen() {
           ? await ACCOUNT_API.register(cleanName, cleanEmail, password)
           : await ACCOUNT_API.login(cleanEmail, password);
       setUser(tokens.user);
+      setBoot('ready');
+      setBootNotice(null);
       setPassword('');
       setNotice(
         mode === 'register'
@@ -140,45 +194,35 @@ export default function AccountScreen() {
           : `Selamat datang kembali, ${tokens.user.name}.`,
       );
     } catch (e) {
-      setError(messageOf(e));
+      setError(apiErrorMessage(e, 'Gagal masuk. Coba lagi.'));
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
   const doLogout = async () => {
     if (!ACCOUNT_API) return;
-    setBusy(true);
+    setBusyAction('logout');
     setError(null);
     setNotice(null);
     try {
-      await ACCOUNT_API.logout();
+      await ACCOUNT_API.logout({ remote: !offline });
     } catch {
       // Token lokal sudah dihapus oleh AccountApi.logout(); kegagalan jaringan tidak menghalangi keluar.
     } finally {
       setUser(null);
       setPassword('');
       setLastSynced(null);
-      setBusy(false);
+      setBoot('ready');
+      setBootNotice(null);
+      setBusyAction(null);
       setNotice('Kamu sudah keluar dari akun.');
     }
   };
 
-  const confirmLogout = () => {
-    if (!ACCOUNT_API || busy) return;
-    Alert.alert(
-      'Keluar dari akun?',
-      'Cadangan di cloud tetap tersimpan. Data di perangkat ini tidak dihapus.',
-      [
-        { text: 'Batal', style: 'cancel' },
-        { text: 'Keluar', style: 'destructive', onPress: () => void doLogout() },
-      ],
-    );
-  };
-
   const doBackup = async () => {
-    if (!ACCOUNT_API) return;
-    setBusy(true);
+    if (!ACCOUNT_API || offline) return;
+    setBusyAction('backup');
     setError(null);
     setNotice(null);
     try {
@@ -186,82 +230,70 @@ export default function AccountScreen() {
       setLastSynced(updatedAt);
       setNotice(`Cadangan tersimpan: ${players.length} pemain, ${sessions.length} sesi.`);
     } catch (e) {
-      setError(messageOf(e));
+      setError(apiErrorMessage(e, 'Gagal mencadangkan. Coba lagi.'));
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
-  const confirmBackup = () => {
-    if (!ACCOUNT_API || !user || busy) return;
-    Alert.alert(
-      'Cadangkan ke cloud?',
-      `Cadangan berisi ${players.length} pemain dan ${sessions.length} sesi. Cadangan sebelumnya di akun ${user.email} akan diganti.`,
-      [
-        { text: 'Batal', style: 'cancel' },
-        { text: 'Cadangkan', onPress: () => void doBackup() },
-      ],
-    );
-  };
-
   const applyRestore = async (snapshot: Snapshot, updatedAt: string | null) => {
-    setBusy(true);
+    setBusyAction('restore');
     setError(null);
     setNotice(null);
     try {
-      await applySnapshot(snapshot.players, snapshot.sessions);
+      const storeError = await applySnapshot(snapshot.players, snapshot.sessions);
+      if (storeError) {
+        setError(storeError);
+        return;
+      }
       setLastSynced(updatedAt);
       setNotice(
         `Cadangan dipulihkan: ${snapshot.players.length} pemain, ${snapshot.sessions.length} sesi.`,
       );
-    } catch (e) {
-      setError(messageOf(e));
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   };
 
   const fetchRestore = async () => {
-    if (!ACCOUNT_API) return;
-    setBusy(true);
+    if (!ACCOUNT_API || offline) return;
+    setBusyAction('restore');
     setError(null);
     setNotice(null);
     try {
       const data = await ACCOUNT_API.pullSnapshot();
       const snapshot = parseSnapshot(data);
-      setBusy(false);
       if (snapshot.players.length === 0 && snapshot.sessions.length === 0) {
         setNotice('Belum ada cadangan di akun ini.');
         return;
       }
-      Alert.alert(
-        'Ganti data lokal?',
-        `Cadangan berisi ${snapshot.players.length} pemain dan ${snapshot.sessions.length} sesi. Data lokal saat ini akan diganti seluruhnya.`,
-        [
-          { text: 'Batal', style: 'cancel' },
-          {
-            text: 'Pulihkan',
-            style: 'destructive',
-            onPress: () => void applyRestore(snapshot, data.updatedAt),
-          },
-        ],
-      );
+      setPendingRestore({ snapshot, updatedAt: data.updatedAt });
+      setConfirm('applyRestore');
     } catch (e) {
-      setError(messageOf(e));
-      setBusy(false);
+      setError(apiErrorMessage(e, 'Gagal mengunduh cadangan. Coba lagi.'));
+    } finally {
+      setBusyAction(null);
     }
   };
 
+  const confirmLogout = () => {
+    if (!ACCOUNT_API || busy) return;
+    setConfirm('logout');
+  };
+
+  const confirmBackup = () => {
+    if (!ACCOUNT_API || !user || busy || offline) return;
+    setConfirm('backup');
+  };
+
   const confirmRestore = () => {
-    if (!ACCOUNT_API || !user || busy) return;
-    Alert.alert(
-      'Pulihkan dari cloud?',
-      'Cadangan terakhir akun ini akan diunduh dulu. Data lokal baru diganti setelah kamu menyetujui.',
-      [
-        { text: 'Batal', style: 'cancel' },
-        { text: 'Unduh', onPress: () => void fetchRestore() },
-      ],
-    );
+    if (!ACCOUNT_API || !user || busy || offline) return;
+    setConfirm('restore');
+  };
+
+  const closeConfirm = () => {
+    setConfirm(null);
+    if (confirm === 'applyRestore') setPendingRestore(null);
   };
 
   return (
@@ -274,10 +306,24 @@ export default function AccountScreen() {
           contentContainerStyle={[styles.scroll, { paddingBottom: insets.bottom + 24 }]}
           keyboardShouldPersistTaps="handled">
           <View style={Common.content}>
-            {error ? <Banner tone="error" text={error} /> : null}
-            {notice ? <Banner tone="success" text={notice} /> : null}
+            {offline ? (
+              <StatusBanner
+                tone="offline"
+                text="Kamu sedang offline. Data lokal tetap aman; masuk, daftar, dan cadangan cloud butuh internet."
+                style={styles.banner}
+              />
+            ) : null}
+            {bootNotice ? (
+              <StatusBanner
+                tone={bootNotice.tone === 'offline' ? 'offline' : 'info'}
+                text={bootNotice.text}
+                style={styles.banner}
+              />
+            ) : null}
+            {error ? <StatusBanner tone="error" text={error} style={styles.banner} /> : null}
+            {notice ? <StatusBanner tone="success" text={notice} style={styles.banner} /> : null}
 
-            {loading ? (
+            {boot === 'checking' ? (
               <View style={[styles.card, styles.centered]}>
                 <ActivityIndicator color={Colors.accent} />
                 <Text style={styles.mutedText}>Memeriksa sesi akun…</Text>
@@ -319,27 +365,55 @@ export default function AccountScreen() {
                     {lastSynced ? ` Terakhir disinkronkan ${formatDate(lastSynced)}.` : ''}
                   </Text>
                   <AppButton
-                    label={busy ? 'Memproses…' : 'Cadangkan Sekarang'}
-                    disabled={busy}
-                    disabledReason="Tunggu proses sebelumnya selesai."
+                    label="Cadangkan Sekarang"
+                    loading={busyAction === 'backup'}
+                    loadingLabel="Mencadangkan…"
+                    disabled={busy || offline}
+                    disabledReason={
+                      offline ? 'Cadangan cloud butuh koneksi internet.' : 'Tunggu proses sebelumnya selesai.'
+                    }
                     onPress={confirmBackup}
                   />
                   <AppButton
                     label="Pulihkan dari Cloud"
                     variant="ghost"
-                    disabled={busy}
-                    disabledReason="Tunggu proses sebelumnya selesai."
+                    loading={busyAction === 'restore'}
+                    loadingLabel="Memproses…"
+                    disabled={busy || offline}
+                    disabledReason={
+                      offline ? 'Pemulihan cloud butuh koneksi internet.' : 'Tunggu proses sebelumnya selesai.'
+                    }
                     onPress={confirmRestore}
                   />
                   <AppButton
                     label="Keluar dari Akun"
                     variant="danger"
+                    loading={busyAction === 'logout'}
+                    loadingLabel="Keluar…"
                     disabled={busy}
                     disabledReason="Tunggu proses sebelumnya selesai."
                     onPress={confirmLogout}
                   />
                 </View>
               </>
+            ) : boot === 'blocked' ? (
+              <View style={styles.card}>
+                <Text accessibilityRole="header" style={styles.cardTitle}>
+                  Profil akun belum bisa dimuat
+                </Text>
+                <Text style={styles.mutedText}>
+                  Sesi tersimpan di perangkat ini, tetapi profilnya belum bisa diambil. Periksa
+                  koneksi lalu coba lagi.
+                </Text>
+                <AppButton label="Coba Lagi" loading={busy} onPress={retryBoot} />
+                <AppButton
+                  label="Keluar dari Akun"
+                  variant="ghost"
+                  disabled={busy}
+                  disabledReason="Tunggu proses sebelumnya selesai."
+                  onPress={confirmLogout}
+                />
+              </View>
             ) : (
               <View style={styles.card}>
                 <View accessibilityRole="tablist" style={styles.modeRow}>
@@ -435,9 +509,13 @@ export default function AccountScreen() {
                 </View>
 
                 <AppButton
-                  label={busy ? 'Memproses…' : mode === 'login' ? 'Masuk' : 'Daftar'}
-                  disabled={busy}
-                  disabledReason="Tunggu proses sebelumnya selesai."
+                  label={mode === 'login' ? 'Masuk' : 'Daftar'}
+                  loading={busyAction === 'auth'}
+                  loadingLabel={mode === 'login' ? 'Masuk…' : 'Mendaftar…'}
+                  disabled={busy || offline}
+                  disabledReason={
+                    offline ? 'Masuk dan daftar butuh koneksi internet.' : 'Tunggu proses sebelumnya selesai.'
+                  }
                   onPress={submitAuth}
                 />
                 <Text style={styles.hint}>
@@ -473,24 +551,55 @@ export default function AccountScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </View>
-  );
-}
 
-function Banner({ tone, text }: { tone: 'error' | 'success'; text: string }) {
-  const isError = tone === 'error';
-  return (
-    <View
-      accessibilityRole="alert"
-      style={[styles.banner, isError ? styles.bannerError : styles.bannerSuccess]}>
-      <MaterialIcons
-        name={isError ? 'error-outline' : 'check-circle-outline'}
-        size={18}
-        color={isError ? Colors.danger : Colors.accent}
+      <ConfirmSheet
+        visible={confirm === 'logout'}
+        title="Keluar dari akun?"
+        message="Cadangan di cloud tetap tersimpan. Data di perangkat ini tidak dihapus."
+        confirmLabel="Keluar"
+        destructive
+        onCancel={closeConfirm}
+        onConfirm={async () => {
+          setConfirm(null);
+          await doLogout();
+        }}
       />
-      <Text style={[styles.bannerText, isError ? styles.bannerTextError : styles.bannerTextSuccess]}>
-        {text}
-      </Text>
+      <ConfirmSheet
+        visible={confirm === 'backup'}
+        title="Cadangkan ke cloud?"
+        message={`Cadangan berisi ${players.length} pemain dan ${sessions.length} sesi. Cadangan sebelumnya di akun ${user?.email ?? ''} akan diganti.`}
+        confirmLabel="Cadangkan"
+        onCancel={closeConfirm}
+        onConfirm={async () => {
+          setConfirm(null);
+          await doBackup();
+        }}
+      />
+      <ConfirmSheet
+        visible={confirm === 'restore'}
+        title="Pulihkan dari cloud?"
+        message="Cadangan terakhir akun ini akan diunduh dulu. Data lokal baru diganti setelah kamu menyetujui."
+        confirmLabel="Unduh"
+        onCancel={closeConfirm}
+        onConfirm={async () => {
+          setConfirm(null);
+          await fetchRestore();
+        }}
+      />
+      <ConfirmSheet
+        visible={confirm === 'applyRestore'}
+        title="Ganti data lokal?"
+        message={`Cadangan berisi ${pendingRestore?.snapshot.players.length ?? 0} pemain dan ${pendingRestore?.snapshot.sessions.length ?? 0} sesi. Data lokal saat ini akan diganti seluruhnya.`}
+        confirmLabel="Pulihkan"
+        destructive
+        onCancel={closeConfirm}
+        onConfirm={async () => {
+          const pending = pendingRestore;
+          setConfirm(null);
+          setPendingRestore(null);
+          if (pending) await applyRestore(pending.snapshot, pending.updatedAt);
+        }}
+      />
     </View>
   );
 }
@@ -511,20 +620,7 @@ const styles = StyleSheet.create({
   cardTitle: { color: Colors.ink, fontFamily: FontFamily.display, fontSize: 16 },
   mutedText: { color: Colors.muted, fontFamily: FontFamily.body, fontSize: 13, lineHeight: 19 },
   hint: { color: Colors.muted, fontFamily: FontFamily.body, fontSize: 12 },
-  banner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    borderWidth: 1,
-    borderRadius: Radius.md,
-    padding: 12,
-    marginBottom: 12,
-  },
-  bannerError: { backgroundColor: Soft.dangerSoft, borderColor: Colors.danger },
-  bannerSuccess: { backgroundColor: Soft.accentSoft, borderColor: Colors.accent },
-  bannerText: { flex: 1, fontFamily: FontFamily.bodyMedium, fontSize: 13, lineHeight: 18 },
-  bannerTextError: { color: Colors.danger },
-  bannerTextSuccess: { color: Colors.accent },
+  banner: { marginBottom: 12 },
   profileRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   profileIcon: {
     width: 48,
