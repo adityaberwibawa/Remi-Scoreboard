@@ -4,8 +4,9 @@ export function json(status, body) {
     headers: {
       'Cache-Control': 'no-store',
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, PUT, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+      'Access-Control-Expose-Headers': 'Retry-After',
     },
   });
 }
@@ -15,7 +16,7 @@ export function options() {
     status: 204,
     headers: {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, PUT, POST, OPTIONS',
       'Access-Control-Allow-Headers': 'Authorization, Content-Type',
       'Access-Control-Max-Age': '86400',
     },
