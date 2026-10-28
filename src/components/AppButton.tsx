@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
 import { Colors, FontFamily, MIN_TOUCH, Radius } from '../theme';
 
 interface Props {
@@ -9,6 +9,9 @@ interface Props {
   disabledReason?: string;
   hint?: string;
   icon?: React.ReactNode;
+  /** Tampilkan spinner dan cegah tekan ganda selama aksi berjalan. */
+  loading?: boolean;
+  loadingLabel?: string;
 }
 
 export function AppButton({
@@ -19,35 +22,39 @@ export function AppButton({
   disabledReason,
   hint,
   icon,
+  loading = false,
+  loadingLabel,
 }: Props) {
   const isPrimary = variant === 'primary';
   const isDanger = variant === 'danger';
+  const isDisabled = !!disabled || loading;
+  const spinnerColor = isPrimary ? Colors.onAccent : isDanger ? Colors.coal : Colors.accent;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint={disabled && disabledReason ? disabledReason : hint}
-      accessibilityState={{ disabled: !!disabled }}
-      disabled={disabled}
+      accessibilityState={{ disabled: isDisabled, busy: loading }}
+      disabled={isDisabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.base,
         isPrimary && styles.primary,
         variant === 'ghost' && styles.ghost,
         isDanger && styles.danger,
-        disabled && styles.disabled,
-        pressed && !disabled && styles.pressed,
+        isDisabled && styles.disabled,
+        pressed && !isDisabled && styles.pressed,
       ]}>
-      {icon}
+      {loading ? <ActivityIndicator size="small" color={spinnerColor} /> : icon}
       <Text
         style={[
           styles.text,
           isPrimary && styles.textOnAccent,
           isDanger && styles.textOnDanger,
           variant === 'ghost' && styles.textGhost,
-          disabled && styles.textDisabled,
+          isDisabled && styles.textDisabled,
         ]}>
-        {label}
+        {loading && loadingLabel ? loadingLabel : label}
       </Text>
     </Pressable>
   );

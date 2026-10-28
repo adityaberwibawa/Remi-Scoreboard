@@ -21,13 +21,15 @@ interface Props {
   saveLabel: string;
   onSave: (scores: Record<string, number>) => void;
   onClose: () => void;
+  /** Spinner pada tombol simpan; mencegah tekan ganda. */
+  saving?: boolean;
 }
 
 /**
  * Modal input skor: satu stepper per pemain. Nilai awal = skor tersimpan.
  * Komponen di-mount hanya saat dibuka agar nilai awal selalu sesuai ronde.
  */
-export function ScoreModal({ title, subtitle, players, saveLabel, onSave, onClose }: Props) {
+export function ScoreModal({ title, subtitle, players, saveLabel, onSave, onClose, saving }: Props) {
   const insets = useSafeAreaInsets();
   const [values, setValues] = useState<Record<string, string>>(() => {
     const seed: Record<string, string> = {};
@@ -112,6 +114,9 @@ export function ScoreModal({ title, subtitle, players, saveLabel, onSave, onClos
             <View style={[styles.footerBtn, styles.footerMain]}>
               <AppButton
                 label={saveLabel}
+                loading={saving}
+                loadingLabel="Menyimpan…"
+                disabled={saving}
                 onPress={() => {
                   if (!parsed) {
                     setError('Semua skor harus berupa angka. Tulis 0 bila tanpa skor.');
