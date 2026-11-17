@@ -43,6 +43,16 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="location"
+        options={{
+          title: 'Lokasi',
+          tabBarAccessibilityLabel: 'Tab Lokasi',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialIcons name="place" size={size} color={color as string} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="account"
         options={{
           title: 'Akun',
