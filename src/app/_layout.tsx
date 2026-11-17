@@ -23,6 +23,7 @@ import { useAuth } from '../auth/useAuth';
 import { AppButton } from '../components/AppButton';
 import { NetworkBanner } from '../components/NetworkBanner';
 import { StatusBanner } from '../components/StatusBanner';
+import '../location/geofenceTask';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
