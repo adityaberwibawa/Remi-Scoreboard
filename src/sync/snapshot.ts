@@ -11,6 +11,7 @@ import type {
   Participant,
   Player,
   Round,
+  SessionLocation,
   SessionStatus,
 } from '../types';
 
@@ -97,6 +98,39 @@ function toRound(value: unknown): Round | null {
   return { roundNumber, scores };
 }
 
+/** Lokasi sesi opsional: payload rusak dibuang tanpa menggagalkan sesi. */
+function toLocation(value: unknown): SessionLocation | undefined {
+  if (!isRecord(value)) return undefined;
+  const latitude = value.latitude;
+  const longitude = value.longitude;
+  if (
+    typeof latitude !== 'number' ||
+    typeof longitude !== 'number' ||
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    Math.abs(latitude) > 90 ||
+    Math.abs(longitude) > 180
+  ) {
+    return undefined;
+  }
+  const accuracy =
+    typeof value.accuracy === 'number' && Number.isFinite(value.accuracy) && value.accuracy >= 0
+      ? Math.min(value.accuracy, 100_000)
+      : null;
+  const address = nonEmptyString(value.address);
+  const capturedAt =
+    typeof value.capturedAt === 'string' && Number.isFinite(Date.parse(value.capturedAt))
+      ? value.capturedAt
+      : new Date().toISOString();
+  return {
+    latitude,
+    longitude,
+    accuracy,
+    address: address ? address.slice(0, 160) : null,
+    capturedAt,
+  };
+}
+
 function toSession(value: unknown, playerIds: Set<string>): GameSession | null {
   if (!isRecord(value)) return null;
   const id = nonEmptyString(value.id);
@@ -143,6 +177,7 @@ function toSession(value: unknown, playerIds: Set<string>): GameSession | null {
     },
     rounds,
     winnerPlayerId: winnerPlayerId && playerIds.has(winnerPlayerId) ? winnerPlayerId : undefined,
+    location: toLocation(value.location),
   };
 }
 

@@ -1,8 +1,11 @@
 /** Lapisan SQLite: skema + CRUD. Sumber kebenaran persistensi (offline-first). */
 import * as SQLite from 'expo-sqlite';
 import type {
+  Arena,
   AvatarColorStyle,
   GameSession,
+  GeofenceEvent,
+  GeofenceEventType,
   Participant,
   Player,
   Round,
@@ -59,7 +62,12 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       status TEXT NOT NULL,
       target_enabled INTEGER NOT NULL DEFAULT 0,
       target_score INTEGER NOT NULL DEFAULT 500,
-      winner_id TEXT
+      winner_id TEXT,
+      loc_lat REAL,
+      loc_lng REAL,
+      loc_accuracy REAL,
+      loc_address TEXT,
+      loc_captured_at TEXT
     );
     CREATE TABLE IF NOT EXISTS participants (
       session_id TEXT NOT NULL,
@@ -80,7 +88,47 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       payload TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS arena (
+      id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+      name TEXT NOT NULL,
+      latitude REAL NOT NULL,
+      longitude REAL NOT NULL,
+      radius_m INTEGER NOT NULL,
+      address TEXT,
+      monitoring INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS geofence_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      arena_name TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS geocode_cache (
+      key TEXT PRIMARY KEY NOT NULL,
+      address TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
+
+  // Database lama dibuat sebelum fitur lokasi ada: tambahkan kolom tanpa menghapus data.
+  await ensureColumn(db, 'sessions', 'loc_lat', 'REAL');
+  await ensureColumn(db, 'sessions', 'loc_lng', 'REAL');
+  await ensureColumn(db, 'sessions', 'loc_accuracy', 'REAL');
+  await ensureColumn(db, 'sessions', 'loc_address', 'TEXT');
+  await ensureColumn(db, 'sessions', 'loc_captured_at', 'TEXT');
+}
+
+async function ensureColumn(
+  db: SQLite.SQLiteDatabase,
+  table: string,
+  column: string,
+  definition: string,
+): Promise<void> {
+  const rows = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${table})`);
+  if (!rows.some((row) => row.name === column)) {
+    await db.execAsync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }
 
 interface PlayerRow {
@@ -177,6 +225,11 @@ interface SessionRow {
   target_enabled: number;
   target_score: number;
   winner_id: string | null;
+  loc_lat: number | null;
+  loc_lng: number | null;
+  loc_accuracy: number | null;
+  loc_address: string | null;
+  loc_captured_at: string | null;
 }
 
 interface ParticipantRow {
@@ -229,6 +282,16 @@ export async function fetchSessions(): Promise<GameSession[]> {
       rules,
       rounds,
       winnerPlayerId: s.winner_id ?? undefined,
+      location:
+        s.loc_lat != null && s.loc_lng != null
+          ? {
+              latitude: s.loc_lat,
+              longitude: s.loc_lng,
+              accuracy: s.loc_accuracy ?? null,
+              address: s.loc_address ?? null,
+              capturedAt: s.loc_captured_at ?? s.created_at,
+            }
+          : undefined,
     });
   }
   return sessions;
@@ -237,8 +300,10 @@ export async function fetchSessions(): Promise<GameSession[]> {
 export async function insertSession(s: GameSession): Promise<void> {
   const db = await getDb();
   await db.runAsync(
-    `INSERT INTO sessions (id, title, created_at, status, target_enabled, target_score, winner_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO sessions (
+       id, title, created_at, status, target_enabled, target_score, winner_id,
+       loc_lat, loc_lng, loc_accuracy, loc_address, loc_captured_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     s.id,
     s.title,
     s.createdAt,
@@ -246,6 +311,11 @@ export async function insertSession(s: GameSession): Promise<void> {
     s.rules.targetScoreEnabled ? 1 : 0,
     s.rules.targetScore,
     s.winnerPlayerId ?? null,
+    s.location?.latitude ?? null,
+    s.location?.longitude ?? null,
+    s.location?.accuracy ?? null,
+    s.location?.address ?? null,
+    s.location?.capturedAt ?? null,
   );
   for (const p of s.participants) {
     await db.runAsync(
@@ -356,4 +426,134 @@ export async function replaceAllData(players: Player[], sessions: GameSession[])
       await insertRound(session.id, round.roundNumber, round.scores);
     }
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Arena & geofence                                                    */
+/* ------------------------------------------------------------------ */
+
+interface ArenaRow {
+  name: string;
+  latitude: number;
+  longitude: number;
+  radius_m: number;
+  address: string | null;
+  monitoring: number;
+  updated_at: string;
+}
+
+export async function fetchArena(): Promise<Arena | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<ArenaRow>('SELECT * FROM arena WHERE id = 1');
+  if (!row) return null;
+  return {
+    name: row.name,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    radiusM: row.radius_m,
+    address: row.address,
+    monitoring: row.monitoring === 1,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function saveArenaRow(arena: Arena): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT INTO arena (id, name, latitude, longitude, radius_m, address, monitoring, updated_at)
+     VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       name = excluded.name,
+       latitude = excluded.latitude,
+       longitude = excluded.longitude,
+       radius_m = excluded.radius_m,
+       address = excluded.address,
+       monitoring = excluded.monitoring,
+       updated_at = excluded.updated_at`,
+    arena.name,
+    arena.latitude,
+    arena.longitude,
+    arena.radiusM,
+    arena.address,
+    arena.monitoring ? 1 : 0,
+    arena.updatedAt,
+  );
+}
+
+export async function deleteArenaRow(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM arena WHERE id = 1');
+}
+
+interface GeofenceEventRow {
+  arena_name: string;
+  event_type: string;
+  at: string;
+}
+
+function rowToGeofenceEvent(row: GeofenceEventRow): GeofenceEvent {
+  return {
+    type: (row.event_type === 'enter' ? 'enter' : 'exit') as GeofenceEventType,
+    arenaName: row.arena_name,
+    at: row.at,
+  };
+}
+
+export async function insertGeofenceEvent(event: GeofenceEvent): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    'INSERT INTO geofence_events (arena_name, event_type, at) VALUES (?, ?, ?)',
+    event.arenaName,
+    event.type,
+    event.at,
+  );
+}
+
+export async function fetchGeofenceEvents(limit = 5): Promise<GeofenceEvent[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<GeofenceEventRow>(
+    'SELECT arena_name, event_type, at FROM geofence_events ORDER BY at DESC, id DESC LIMIT ?',
+    Math.max(1, Math.min(50, Math.trunc(limit))),
+  );
+  return rows.map(rowToGeofenceEvent);
+}
+
+export async function fetchLastGeofenceEvent(): Promise<GeofenceEvent | null> {
+  const events = await fetchGeofenceEvents(1);
+  return events[0] ?? null;
+}
+
+export async function clearGeofenceEvents(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM geofence_events');
+}
+
+/* ------------------------------------------------------------------ */
+/* Cache reverse geocoding                                             */
+/* ------------------------------------------------------------------ */
+
+export interface GeocodeCacheEntry {
+  address: string;
+  updatedAt: string;
+}
+
+export async function readGeocodeCache(key: string): Promise<GeocodeCacheEntry | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ address: string; updated_at: string }>(
+    'SELECT address, updated_at FROM geocode_cache WHERE key = ?',
+    key,
+  );
+  if (!row) return null;
+  return { address: row.address, updatedAt: row.updated_at };
+}
+
+export async function writeGeocodeCache(key: string, address: string): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT INTO geocode_cache (key, address, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET address = excluded.address, updated_at = excluded.updated_at`,
+    key,
+    address,
+    new Date().toISOString(),
+  );
 }

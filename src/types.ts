@@ -45,6 +45,17 @@ export interface SessionRules {
   targetScore: number;
 }
 
+/** Lokasi tempat sesi permainan dimulai. */
+export interface SessionLocation {
+  latitude: number;
+  longitude: number;
+  /** Radius akurasi GPS dalam meter (null bila perangkat tidak melaporkan). */
+  accuracy: number | null;
+  /** Alamat hasil reverse geocoding (null bila tidak tersedia). */
+  address: string | null;
+  capturedAt: string;
+}
+
 export interface GameSession {
   id: string;
   title: string;
@@ -54,6 +65,26 @@ export interface GameSession {
   rules: SessionRules;
   rounds: Round[];
   winnerPlayerId?: string;
+  location?: SessionLocation;
+}
+
+/** Arena tetap yang dipakai sebagai pusat geofence. */
+export interface Arena {
+  name: string;
+  latitude: number;
+  longitude: number;
+  radiusM: number;
+  address: string | null;
+  monitoring: boolean;
+  updatedAt: string;
+}
+
+export type GeofenceEventType = 'enter' | 'exit';
+
+export interface GeofenceEvent {
+  type: GeofenceEventType;
+  arenaName: string;
+  at: string;
 }
 
 export interface RankEntry {
