@@ -29,7 +29,11 @@
         "android.permission.CAMERA",
         "android.permission.USE_BIOMETRIC",
         "android.permission.RECORD_AUDIO",
-        "android.permission.USE_FINGERPRINT"
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "plugins": [
@@ -70,6 +74,23 @@
         "expo-local-authentication",
         {
           "faceIDPermission": "PentungScore memakai Face ID agar hanya pemilik perangkat yang bisa membuka data permainan."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "PentungScore memakai lokasi untuk menandai arena dan lokasi sesi permainan.",
+          "locationAlwaysAndWhenInUsePermission": "PentungScore memakai lokasi latar belakang untuk memberi tahu saat Anda masuk atau keluar arena permainan.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#34D399",
+          "defaultChannel": "arena-geofence"
         }
       ],
       "expo-status-bar"
