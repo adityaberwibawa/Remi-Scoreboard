@@ -23,8 +23,11 @@ import { useAuth } from '../auth/useAuth';
 import { AppButton } from '../components/AppButton';
 import { NetworkBanner } from '../components/NetworkBanner';
 import { StatusBanner } from '../components/StatusBanner';
+import '../location/geofenceTask';
+import { configureNotifications } from '../location/notifications';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
+configureNotifications();
 
 /** Fallback level rute: menangkap error render agar aplikasi tidak menjadi layar putih. */
 export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {

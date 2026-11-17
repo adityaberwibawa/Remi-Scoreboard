@@ -33,6 +33,16 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="arena"
+        options={{
+          title: 'Arena',
+          tabBarAccessibilityLabel: 'Tab Arena dan Lokasi',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialIcons name="place" size={size} color={color as string} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="players"
         options={{
           title: 'Pemain',
