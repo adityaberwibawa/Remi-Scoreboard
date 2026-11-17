@@ -70,4 +70,63 @@ describe('parseSnapshot', () => {
     expect(snapshot.sessions[0].rounds).toHaveLength(1);
     expect(snapshot.sessions[0].winnerPlayerId).toBeUndefined();
   });
+
+  it('mempertahankan lokasi sesi yang valid', () => {
+    const snapshot = parseSnapshot({
+      players: [validPlayer],
+      sessions: [
+        {
+          ...validSession,
+          location: {
+            latitude: -6.2,
+            longitude: 106.8,
+            accuracy: 8.5,
+            address: '  Jl. Merdeka 1  ',
+            capturedAt: '2024-01-02T00:05:00.000Z',
+          },
+        },
+      ],
+    });
+
+    expect(snapshot.sessions[0].location).toEqual({
+      latitude: -6.2,
+      longitude: 106.8,
+      accuracy: 8.5,
+      address: 'Jl. Merdeka 1',
+      capturedAt: '2024-01-02T00:05:00.000Z',
+    });
+  });
+
+  it('membuang lokasi dengan koordinat tidak valid', () => {
+    const snapshot = parseSnapshot({
+      players: [validPlayer],
+      sessions: [{ ...validSession, location: { latitude: 200, longitude: 106.8 } }],
+    });
+
+    expect(snapshot.sessions[0].location).toBeUndefined();
+  });
+
+  it('menormalkan lokasi rusak tanpa menggagalkan sesi', () => {
+    const snapshot = parseSnapshot({
+      players: [validPlayer],
+      sessions: [
+        {
+          ...validSession,
+          location: {
+            latitude: -6.2,
+            longitude: 106.8,
+            accuracy: -3,
+            address: 42,
+            capturedAt: 'bukan tanggal',
+          },
+        },
+      ],
+    });
+
+    const location = snapshot.sessions[0].location;
+    expect(location).toBeDefined();
+    expect(location?.accuracy).toBeNull();
+    expect(location?.address).toBeNull();
+    expect(Number.isFinite(Date.parse(location?.capturedAt ?? ''))).toBe(true);
+  });
 });

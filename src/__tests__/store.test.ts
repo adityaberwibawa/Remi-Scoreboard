@@ -1,24 +1,34 @@
 import {
   clearDealerExcept,
+  clearGeofenceEvents,
+  deleteArenaRow,
   deleteLastRound,
   deleteSessionRow,
+  fetchArena,
+  fetchGeofenceEvents,
   fetchPlayers,
   fetchSessions,
   getDb,
   insertPlayer,
   insertRound,
+  insertSession,
   replaceAllData,
+  saveArenaRow,
   updatePlayer,
   updateSessionMeta,
 } from '../db';
 import { useStore } from '../store';
-import type { GameSession, Player } from '../types';
+import type { Arena, GameSession, Player, SessionLocation } from '../types';
 
 jest.mock('../db', () => ({
   clearDealerExcept: jest.fn(),
+  clearGeofenceEvents: jest.fn(),
+  deleteArenaRow: jest.fn(),
   deleteLastRound: jest.fn(),
   deletePlayerRow: jest.fn(),
   deleteSessionRow: jest.fn(),
+  fetchArena: jest.fn(),
+  fetchGeofenceEvents: jest.fn(),
   fetchPlayers: jest.fn(),
   fetchSessions: jest.fn(),
   getDb: jest.fn(),
@@ -26,6 +36,7 @@ jest.mock('../db', () => ({
   insertRound: jest.fn(),
   insertSession: jest.fn(),
   replaceAllData: jest.fn(),
+  saveArenaRow: jest.fn(),
   updatePlayer: jest.fn(),
   updateRound: jest.fn(),
   updateSessionMeta: jest.fn(),
@@ -34,7 +45,10 @@ jest.mock('../db', () => ({
 const mockedGetDb = jest.mocked(getDb);
 const mockedFetchPlayers = jest.mocked(fetchPlayers);
 const mockedFetchSessions = jest.mocked(fetchSessions);
+const mockedFetchArena = jest.mocked(fetchArena);
+const mockedFetchGeofenceEvents = jest.mocked(fetchGeofenceEvents);
 const mockedInsertPlayer = jest.mocked(insertPlayer);
+const mockedInsertSession = jest.mocked(insertSession);
 const mockedDeleteSessionRow = jest.mocked(deleteSessionRow);
 const mockedReplaceAllData = jest.mocked(replaceAllData);
 const mockedDeleteLastRound = jest.mocked(deleteLastRound);
@@ -42,6 +56,9 @@ const mockedInsertRound = jest.mocked(insertRound);
 const mockedUpdateSessionMeta = jest.mocked(updateSessionMeta);
 const mockedClearDealerExcept = jest.mocked(clearDealerExcept);
 const mockedUpdatePlayer = jest.mocked(updatePlayer);
+const mockedSaveArenaRow = jest.mocked(saveArenaRow);
+const mockedDeleteArenaRow = jest.mocked(deleteArenaRow);
+const mockedClearGeofenceEvents = jest.mocked(clearGeofenceEvents);
 
 const PLAYER: Player = {
   id: 'p1',
@@ -64,6 +81,24 @@ const SESSION: GameSession = {
   rounds: [],
 };
 
+const LOCATION: SessionLocation = {
+  latitude: -6.2,
+  longitude: 106.8,
+  accuracy: 12,
+  address: 'Jl. Merdeka 1, Jakarta',
+  capturedAt: '2026-10-01T09:55:00.000Z',
+};
+
+const ARENA: Arena = {
+  name: 'Rumah Bowo',
+  latitude: -6.2,
+  longitude: 106.8,
+  radiusM: 150,
+  address: 'Jl. Merdeka 1, Jakarta',
+  monitoring: false,
+  updatedAt: '2026-10-01T09:00:00.000Z',
+};
+
 describe('useStore', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -73,14 +108,22 @@ describe('useStore', () => {
       loadError: null,
       players: [],
       sessions: [],
+      arena: null,
+      geofenceEvents: [],
     });
     mockedGetDb.mockResolvedValue({} as never);
     mockedFetchPlayers.mockResolvedValue([]);
     mockedFetchSessions.mockResolvedValue([]);
+    mockedFetchArena.mockResolvedValue(null);
+    mockedFetchGeofenceEvents.mockResolvedValue([]);
     mockedInsertPlayer.mockResolvedValue(undefined);
+    mockedInsertSession.mockResolvedValue(undefined);
     mockedDeleteSessionRow.mockResolvedValue(undefined);
     mockedReplaceAllData.mockResolvedValue(undefined);
     mockedDeleteLastRound.mockResolvedValue(undefined);
+    mockedSaveArenaRow.mockResolvedValue(undefined);
+    mockedDeleteArenaRow.mockResolvedValue(undefined);
+    mockedClearGeofenceEvents.mockResolvedValue(undefined);
   });
 
   it('menandai load sukses dan menyimpan data', async () => {
@@ -189,5 +232,84 @@ describe('useStore', () => {
     expect(mockedUpdateSessionMeta).toHaveBeenCalledWith(
       expect.objectContaining({ title: 'Baru' }),
     );
+  });
+
+  it('memuat arena dan riwayat geofence saat loadAll', async () => {
+    mockedFetchArena.mockResolvedValue(ARENA);
+    mockedFetchGeofenceEvents.mockResolvedValue([
+      { type: 'enter', arenaName: ARENA.name, at: '2026-10-01T09:10:00.000Z' },
+    ]);
+
+    await useStore.getState().loadAll();
+
+    expect(useStore.getState().arena).toEqual(ARENA);
+    expect(useStore.getState().geofenceEvents).toHaveLength(1);
+    expect(mockedFetchGeofenceEvents).toHaveBeenCalledWith(5);
+  });
+
+  it('menyimpan lokasi ke sesi baru dan meneruskannya ke database', async () => {
+    const second: Player = { ...PLAYER, id: 'p2', name: 'Eko', isDealer: false };
+    useStore.setState({ players: [PLAYER, second] });
+
+    const result = await useStore.getState().createSession({
+      playerIds: ['p1', 'p2'],
+      rules: { targetScoreEnabled: false, targetScore: 0 },
+      location: LOCATION,
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(result.id).toBeTruthy();
+    expect(mockedInsertSession).toHaveBeenCalledWith(
+      expect.objectContaining({ location: LOCATION }),
+    );
+    expect(useStore.getState().sessions[0].location).toEqual(LOCATION);
+  });
+
+  it('menolak koordinat arena yang tidak valid', async () => {
+    const error = await useStore.getState().saveArena({
+      name: 'Arena',
+      latitude: 200,
+      longitude: 106.8,
+      radiusM: 150,
+      address: null,
+    });
+
+    expect(error).toMatch(/tidak valid/);
+    expect(mockedSaveArenaRow).not.toHaveBeenCalled();
+  });
+
+  it('membatasi radius arena dan menyimpannya', async () => {
+    const error = await useStore.getState().saveArena({
+      name: '  Rumah Bowo  ',
+      latitude: -6.2,
+      longitude: 106.8,
+      radiusM: 5000,
+      address: 'Jl. Merdeka',
+    });
+
+    expect(error).toBeNull();
+    expect(mockedSaveArenaRow).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'Rumah Bowo', radiusM: 1000 }),
+    );
+    expect(useStore.getState().arena).toEqual(
+      expect.objectContaining({ name: 'Rumah Bowo', radiusM: 1000 }),
+    );
+  });
+
+  it('menghapus arena dan mengosongkan state', async () => {
+    useStore.setState({ arena: ARENA });
+
+    await expect(useStore.getState().deleteArena()).resolves.toBeNull();
+
+    expect(mockedDeleteArenaRow).toHaveBeenCalled();
+    expect(useStore.getState().arena).toBeNull();
+  });
+
+  it('mengembalikan pesan saat gagal menghapus riwayat geofence', async () => {
+    mockedClearGeofenceEvents.mockRejectedValue(new Error('gagal'));
+
+    const error = await useStore.getState().clearGeofenceHistory();
+
+    expect(error).toMatch(/Gagal menghapus riwayat geofence/);
   });
 });
