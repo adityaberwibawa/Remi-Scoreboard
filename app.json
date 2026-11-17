@@ -72,6 +72,16 @@
           "faceIDPermission": "PentungScore memakai Face ID agar hanya pemilik perangkat yang bisa membuka data permainan."
         }
       ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "PentungScore memakai lokasi untuk menandai arena sesi dan menghitung jarak Anda.",
+          "locationAlwaysAndWhenInUsePermission": "PentungScore memakai lokasi di latar belakang untuk mencatat saat Anda masuk atau keluar arena sesi.",
+          "locationAlwaysPermission": "PentungScore memakai lokasi di latar belakang untuk mencatat saat Anda masuk atau keluar arena sesi.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true
+        }
+      ],
       "expo-status-bar"
     ],
     "extra": {

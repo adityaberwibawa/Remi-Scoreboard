@@ -16,9 +16,11 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const players = useStore((s) => s.players);
   const sessions = useStore((s) => s.sessions);
+  const sessionLocations = useStore((s) => s.sessionLocations);
   const loadAll = useStore((s) => s.loadAll);
   const { templates, loading, refreshing, error, source, cachedAt, retry } = useSessionTemplates();
   const ongoing = sessions.find((s) => s.status === 'ongoing');
+  const ongoingArena = ongoing ? sessionLocations[ongoing.id] : undefined;
 
   useFocusEffect(
     useCallback(() => {
@@ -69,6 +71,44 @@ export default function HomeScreen() {
               </View>
             </Pressable>
           </View>
+          {ongoing ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                ongoingArena
+                  ? `Buka peta arena sesi ${ongoing.title}. ${ongoingArena.address ?? 'Arena tersimpan.'}`
+                  : `Tandai arena sesi ${ongoing.title} di peta`
+              }
+              accessibilityHint="Membuka tab Peta Arena"
+              onPress={() =>
+                router.push({
+                  pathname: '/(tabs)/map',
+                  params: { sessionId: ongoing.id },
+                })
+              }
+              style={styles.arenaCard}>
+              <View style={styles.arenaIcon}>
+                <MaterialIcons name="place" size={21} color={Colors.accent} />
+              </View>
+              <View style={styles.arenaText}>
+                <Text style={styles.arenaTitle}>
+                  {ongoingArena ? 'Arena Sesi' : 'Tandai Arena Sesi'}
+                </Text>
+                <Text style={styles.arenaSub} numberOfLines={1}>
+                  {ongoingArena
+                    ? (ongoingArena.address ??
+                      `${ongoingArena.latitude.toFixed(4)}, ${ongoingArena.longitude.toFixed(4)}`)
+                    : 'Simpan lokasi tempat bermain di peta.'}
+                </Text>
+              </View>
+              <View style={styles.arenaPill}>
+                <Text style={styles.arenaPillText}>
+                  {ongoingArena ? (ongoingArena.geofenceEnabled ? 'Aktif' : 'Atur') : 'Peta'}
+                </Text>
+              </View>
+              <MaterialIcons name="chevron-right" size={20} color={Colors.muted} />
+            </Pressable>
+          ) : null}
           <TemplateSection
             templates={templates}
             loading={loading}
@@ -169,6 +209,36 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   rosterPillText: { color: Colors.accent, fontFamily: FontFamily.bodySemi, fontSize: 12 },
+  arenaCard: {
+    minHeight: 64,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  arenaIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: Colors.raised,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  arenaText: { flex: 1, gap: 2 },
+  arenaTitle: { color: Colors.ink, fontFamily: FontFamily.bodySemi, fontSize: 14 },
+  arenaSub: { color: Colors.muted, fontFamily: FontFamily.body, fontSize: 11 },
+  arenaPill: {
+    backgroundColor: Colors.raised,
+    borderRadius: Radius.full,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  arenaPillText: { color: Colors.accent, fontFamily: FontFamily.bodyMedium, fontSize: 10 },
   saved: { gap: 8 },
   sectionTitle: {
     color: Colors.muted,

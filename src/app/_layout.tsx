@@ -23,6 +23,8 @@ import { useAuth } from '../auth/useAuth';
 import { AppButton } from '../components/AppButton';
 import { NetworkBanner } from '../components/NetworkBanner';
 import { StatusBanner } from '../components/StatusBanner';
+import { GeofenceManager } from '../components/GeofenceManager';
+import '../location/geofenceTask';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
@@ -148,6 +150,7 @@ export default function RootLayout() {
           />
         </Stack>
         <NetworkBanner />
+        <GeofenceManager />
       </View>
     </>
   );

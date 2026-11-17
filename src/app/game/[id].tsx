@@ -44,6 +44,7 @@ export default function GameScreen() {
   const insets = useSafeAreaInsets();
   const sessions = useStore((s) => s.sessions);
   const players = useStore((s) => s.players);
+  const sessionLocations = useStore((s) => s.sessionLocations);
   const loadAll = useStore((s) => s.loadAll);
   const saveRound = useStore((s) => s.saveRound);
   const undoLastRound = useStore((s) => s.undoLastRound);
@@ -69,6 +70,7 @@ export default function GameScreen() {
   );
 
   const session = sessions.find((s) => s.id === id);
+  const arena = session ? sessionLocations[session.id] : undefined;
   const activeParts = useMemo(
     () => (session ? session.participants.filter((p) => p.isActive) : []),
     [session],
@@ -235,6 +237,46 @@ export default function GameScreen() {
             {playerName(players, session.winnerPlayerId)} memenangkan permainan
           </Text>
         </View>
+      ) : null}
+      {arena || ongoing ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            arena
+              ? `Arena sesi. ${arena.address ?? 'Arena tersimpan.'} Buka peta arena.`
+              : 'Tandai arena sesi di peta'
+          }
+          accessibilityHint="Membuka tab Peta Arena untuk sesi ini"
+          onPress={() =>
+            router.push({
+              pathname: '/(tabs)/map',
+              params: { sessionId: session.id },
+            })
+          }
+          style={styles.arenaBanner}>
+          <View style={styles.arenaBannerIcon}>
+            <MaterialIcons name="place" size={18} color={Colors.accent} />
+          </View>
+          <View style={styles.arenaBannerText}>
+            <Text style={styles.arenaBannerTitle}>
+              {arena ? 'Arena Sesi' : 'Tandai Arena Sesi'}
+            </Text>
+            <Text style={styles.arenaBannerSub} numberOfLines={1}>
+              {arena?.address ??
+                (arena
+                  ? `${arena.latitude.toFixed(4)}, ${arena.longitude.toFixed(4)}`
+                  : 'Simpan lokasi tempat bermain agar mudah dibuka lagi.')}
+            </Text>
+          </View>
+          {arena ? (
+            <View style={styles.arenaBannerPill}>
+              <Text style={styles.arenaBannerPillText}>
+                {arena.geofenceEnabled ? 'Pengingat' : 'Radius'}
+              </Text>
+            </View>
+          ) : null}
+          <MaterialIcons name="chevron-right" size={18} color={Colors.muted} />
+        </Pressable>
       ) : null}
       <View style={styles.gridHint}>
         <View style={styles.gridHintLeft}>
@@ -511,6 +553,24 @@ export default function GameScreen() {
                 router.push('/(tabs)/players');
               }}
             />
+            {arena || ongoing ? (
+              <MenuRow
+                icon="place"
+                label="Peta Arena Sesi"
+                hint={
+                  arena
+                    ? 'Lihat arena, radius, dan riwayat area'
+                    : 'Tandai lokasi tempat bermain di peta'
+                }
+                onPress={() => {
+                  setShowMenu(false);
+                  router.push({
+                    pathname: '/(tabs)/map',
+                    params: { sessionId: session.id },
+                  });
+                }}
+              />
+            ) : null}
             <View
               accessible
               accessibilityLabel="Auto-save aktif. Semua data tersimpan otomatis di perangkat."
@@ -666,6 +726,38 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   winnerBannerText: { color: Colors.gold, fontFamily: FontFamily.bodySemi, fontSize: 14, flex: 1 },
+  arenaBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 8,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    minHeight: 52,
+  },
+  arenaBannerIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 9,
+    backgroundColor: Colors.raised,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  arenaBannerText: { flex: 1, gap: 1 },
+  arenaBannerTitle: { color: Colors.ink, fontFamily: FontFamily.bodySemi, fontSize: 12 },
+  arenaBannerSub: { color: Colors.muted, fontFamily: FontFamily.body, fontSize: 10 },
+  arenaBannerPill: {
+    backgroundColor: Soft.accentSoft,
+    borderRadius: Radius.full,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+  },
+  arenaBannerPillText: { color: Colors.accent, fontFamily: FontFamily.bodyMedium, fontSize: 9 },
   gridHint: {
     flexDirection: 'row',
     justifyContent: 'space-between',

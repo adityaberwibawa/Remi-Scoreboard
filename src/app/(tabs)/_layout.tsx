@@ -52,6 +52,16 @@ export default function TabsLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="map"
+        options={{
+          title: 'Peta',
+          tabBarAccessibilityLabel: 'Tab Peta Arena',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialIcons name="place" size={size} color={color as string} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }

@@ -4,10 +4,14 @@ import {
   clearDealerExcept,
   deleteLastRound,
   deletePlayerRow,
+  deleteSessionLocationData,
   deleteSessionRow,
+  fetchGeofenceEvents,
   fetchPlayers,
+  fetchSessionLocations,
   fetchSessions,
   getDb,
+  insertGeofenceEvent,
   insertPlayer,
   insertRound,
   insertSession,
@@ -15,7 +19,10 @@ import {
   updatePlayer,
   updateRound,
   updateSessionMeta,
+  upsertSessionLocation,
 } from './db';
+import type { NewGeofenceEvent } from './db';
+import type { GeofenceEvent, SessionLocation } from './location/types';
 import {
   checkTargetReached,
   defaultSessionTitle,
@@ -39,6 +46,10 @@ interface PentungState {
   loadError: string | null;
   players: Player[];
   sessions: GameSession[];
+  /** Arena sesi, keyed by session id. */
+  sessionLocations: Record<string, SessionLocation>;
+  /** Event masuk/keluar area untuk sesi yang sedang dibuka di tab Peta. */
+  geofenceEvents: GeofenceEvent[];
   loadAll: () => Promise<void>;
   addPlayer: (name: string, avatar: Avatar) => Promise<string | null>;
   renamePlayer: (id: string, name: string) => Promise<string | null>;
@@ -56,6 +67,11 @@ interface PentungState {
   ) => Promise<{ completed: boolean; winnerName?: string; error?: string }>;
   undoLastRound: (sessionId: string) => Promise<{ undone: boolean; error?: string }>;
   deleteSession: (sessionId: string) => Promise<string | null>;
+  saveSessionLocation: (location: SessionLocation) => Promise<string | null>;
+  removeSessionLocation: (sessionId: string) => Promise<string | null>;
+  setGeofenceEnabled: (sessionId: string, enabled: boolean) => Promise<string | null>;
+  loadGeofenceEvents: (sessionId: string) => Promise<void>;
+  recordGeofenceEvent: (event: NewGeofenceEvent) => Promise<void>;
   /** Ganti seluruh data lokal dengan snapshot cloud (pulihkan cadangan). */
   applySnapshot: (players: Player[], sessions: GameSession[]) => Promise<string | null>;
 }
@@ -70,12 +86,27 @@ export const useStore = create<PentungState>((set, get) => ({
   loadError: null,
   players: [],
   sessions: [],
+  sessionLocations: {},
+  geofenceEvents: [],
 
   loadAll: async () => {
     try {
       await getDb();
-      const [players, sessions] = await Promise.all([fetchPlayers(), fetchSessions()]);
-      set({ players, sessions, ready: true, hasLoadedOnce: true, loadError: null });
+      const [players, sessions, savedLocations] = await Promise.all([
+        fetchPlayers(),
+        fetchSessions(),
+        fetchSessionLocations().catch(() => []),
+      ]);
+      const sessionLocations: Record<string, SessionLocation> = {};
+      for (const location of savedLocations) sessionLocations[location.sessionId] = location;
+      set({
+        players,
+        sessions,
+        sessionLocations,
+        ready: true,
+        hasLoadedOnce: true,
+        loadError: null,
+      });
     } catch {
       set({ ready: true, loadError: 'Gagal memuat data tersimpan. Coba lagi.' });
     }
@@ -313,8 +344,77 @@ export const useStore = create<PentungState>((set, get) => ({
     } catch {
       return 'Gagal menghapus sesi. Coba lagi.';
     }
-    set({ sessions: get().sessions.filter((s) => s.id !== sessionId) });
+    const sessionLocations = { ...get().sessionLocations };
+    delete sessionLocations[sessionId];
+    set({
+      sessions: get().sessions.filter((s) => s.id !== sessionId),
+      sessionLocations,
+      geofenceEvents: get().geofenceEvents.filter((e) => e.sessionId !== sessionId),
+    });
     return null;
+  },
+
+  saveSessionLocation: async (location) => {
+    try {
+      await upsertSessionLocation(location);
+    } catch {
+      return 'Gagal menyimpan arena. Coba lagi.';
+    }
+    set({
+      sessionLocations: { ...get().sessionLocations, [location.sessionId]: location },
+    });
+    return null;
+  },
+
+  removeSessionLocation: async (sessionId) => {
+    try {
+      await deleteSessionLocationData(sessionId);
+    } catch {
+      return 'Gagal menghapus arena. Coba lagi.';
+    }
+    const sessionLocations = { ...get().sessionLocations };
+    delete sessionLocations[sessionId];
+    set({
+      sessionLocations,
+      geofenceEvents: get().geofenceEvents.filter((e) => e.sessionId !== sessionId),
+    });
+    return null;
+  },
+
+  setGeofenceEnabled: async (sessionId, enabled) => {
+    const current = get().sessionLocations[sessionId];
+    if (!current) return 'Simpan arena sesi terlebih dahulu.';
+    const updated: SessionLocation = {
+      ...current,
+      geofenceEnabled: enabled,
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      await upsertSessionLocation(updated);
+    } catch {
+      return 'Gagal mengubah geofence. Coba lagi.';
+    }
+    set({ sessionLocations: { ...get().sessionLocations, [sessionId]: updated } });
+    return null;
+  },
+
+  loadGeofenceEvents: async (sessionId) => {
+    try {
+      const events = await fetchGeofenceEvents(sessionId);
+      set({ geofenceEvents: events });
+    } catch {
+      set({ geofenceEvents: [] });
+    }
+  },
+
+  recordGeofenceEvent: async (event) => {
+    try {
+      await insertGeofenceEvent(event);
+      const events = await fetchGeofenceEvents(event.sessionId);
+      set({ geofenceEvents: events });
+    } catch {
+      // Event geofence bersifat best-effort; jangan ganggu alur utama.
+    }
   },
 
   applySnapshot: async (players, sessions) => {
@@ -323,7 +423,13 @@ export const useStore = create<PentungState>((set, get) => ({
     } catch {
       return 'Gagal memulihkan cadangan. Data lokal tidak diubah.';
     }
-    set({ players, sessions, loadError: null });
+    set({
+      players,
+      sessions,
+      sessionLocations: {},
+      geofenceEvents: [],
+      loadError: null,
+    });
     return null;
   },
 }));
