@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Colors, FontFamily, Radius, Soft } from '../theme';
 import { formatDateId, ranking } from '../scoring';
+import { formatCoords } from '../location/geo';
 import { playerName, useStore } from '../store';
 import type { GameSession } from '../types';
 import { RankBadge } from './RankBadge';
@@ -51,6 +52,19 @@ export function SessionCard({ session, onOpen, onDelete }: Props) {
             <Text style={styles.dot}>•</Text>
             <Text style={[styles.metaText, styles.metaAccent]}>{statusLabel}</Text>
           </View>
+          {session.location ? (
+            <View
+              accessible
+              accessibilityLabel={`Lokasi sesi ${
+                session.location.address ?? formatCoords(session.location)
+              }`}
+              style={styles.locationChip}>
+              <MaterialIcons name="place" size={13} color={Colors.accent} />
+              <Text style={styles.locationText} numberOfLines={1} ellipsizeMode="tail">
+                {session.location.address ?? formatCoords(session.location)}
+              </Text>
+            </View>
+          ) : null}
         </View>
         {onDelete ? (
           <Pressable
@@ -129,6 +143,23 @@ const styles = StyleSheet.create({
   metaText: { color: Colors.muted, fontFamily: FontFamily.body, fontSize: 13 },
   metaAccent: { color: Colors.accent },
   dot: { color: Colors.muted },
+  locationChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.raised,
+    borderRadius: Radius.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+  },
+  locationText: {
+    color: Colors.muted,
+    fontFamily: FontFamily.body,
+    fontSize: 12,
+    flexShrink: 1,
+  },
   delete: {
     width: 44,
     height: 44,

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -9,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import * as Location from 'expo-location';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppButton } from '../components/AppButton';
@@ -16,6 +18,7 @@ import { AppHeader } from '../components/AppHeader';
 import { DataErrorBanner } from '../components/DataErrorBanner';
 import { PlayerAvatar } from '../components/PlayerAvatar';
 import { StatusBanner } from '../components/StatusBanner';
+import { AppMap } from '../components/location/AppMap';
 import { Colors, Common, FontFamily, MIN_TOUCH, Radius, Soft } from '../theme';
 import {
   MAX_NAME_LENGTH,
@@ -27,7 +30,13 @@ import {
   TARGET_STEP,
   validateTargetScore,
 } from '../scoring';
+import { getCurrentPlace } from '../location/currentPlace';
+import { formatCoords, formatDistance } from '../location/geo';
+import { useCurrentPlace } from '../location/useCurrentPlace';
 import { useStore } from '../store';
+import type { SessionLocation } from '../types';
+
+const LOCATION_FRESH_MS = 2 * 60 * 1000;
 
 export default function CreateScreen() {
   const insets = useSafeAreaInsets();
@@ -35,6 +44,7 @@ export default function CreateScreen() {
   const sessions = useStore((s) => s.sessions);
   const addPlayer = useStore((s) => s.addPlayer);
   const createSession = useStore((s) => s.createSession);
+  const arena = useStore((s) => s.arena);
   const params = useLocalSearchParams<{
     title?: string;
     minPlayers?: string;
@@ -61,6 +71,17 @@ export default function CreateScreen() {
   const [dealerId, setDealerId] = useState<string | null>(null);
   const [targetEnabled, setTargetEnabled] = useState(defaultTargetEnabled);
   const [target, setTarget] = useState(String(defaultTarget));
+  const [includeLocation, setIncludeLocation] = useState(true);
+  const [refreshingPlace, setRefreshingPlace] = useState(false);
+
+  const {
+    status: placeStatus,
+    place,
+    error: placeError,
+    refresh: refreshPlace,
+    insideFence,
+    distanceToArena,
+  } = useCurrentPlace();
 
   const inclusion: Record<string, boolean> = useMemo(() => {
     if (included) return included;
@@ -101,15 +122,38 @@ export default function CreateScreen() {
     }
   };
 
+  const handleRefreshPlace = async () => {
+    if (refreshingPlace) return;
+    setRefreshingPlace(true);
+    await refreshPlace();
+    setRefreshingPlace(false);
+  };
+
+  /** Pakai posisi yang masih segar; kalau tidak ada, ambil posisi baru saat mulai. */
+  const resolveStartLocation = async (): Promise<SessionLocation | undefined> => {
+    if (!includeLocation) return undefined;
+    if (place) {
+      const age = Date.now() - Date.parse(place.capturedAt);
+      if (Number.isFinite(age) && age >= 0 && age < LOCATION_FRESH_MS) return place;
+    }
+    // Jangan memunculkan dialog izin mendadak saat menekan "Mulai Permainan".
+    const permission = await Location.getForegroundPermissionsAsync().catch(() => null);
+    if (!permission?.granted) return place ?? undefined;
+    const result = await getCurrentPlace().catch(() => null);
+    return result?.place ?? place ?? undefined;
+  };
+
   const start = async () => {
     if (!canStart || targetError || starting) return;
     setStarting(true);
     setActionError(null);
+    const location = await resolveStartLocation();
     const { id, error } = await createSession({
       title: title.trim() || undefined,
       playerIds: readyIds,
       dealerPlayerId: activeDealer,
       rules: { targetScoreEnabled: targetEnabled, targetScore: targetNum },
+      location,
     });
     if (error || !id) {
       setActionError(error ?? 'Gagal memulai permainan. Coba lagi.');
@@ -313,6 +357,113 @@ export default function CreateScreen() {
               </View>
             ) : null}
           </View>
+          <View style={styles.locationCard}>
+            <View style={styles.rulesHead}>
+              <View style={styles.rulesTitle}>
+                <View style={styles.locationTitleRow}>
+                  <MaterialIcons name="place" size={18} color={Colors.accent} />
+                  <Text style={styles.rulesName}>Lokasi Permainan</Text>
+                </View>
+                <Text style={styles.rulesDesc}>
+                  Simpan lokasi tempat game dimulai agar mudah diingat dan bisa dicek dengan arena.
+                </Text>
+              </View>
+              <Switch
+                accessibilityLabel="Sertakan lokasi pada sesi permainan"
+                value={includeLocation}
+                onValueChange={setIncludeLocation}
+                trackColor={{ false: Colors.raised, true: Colors.accent }}
+                thumbColor={includeLocation ? Colors.onAccent : Colors.muted}
+              />
+            </View>
+            {includeLocation ? (
+              <>
+                {(place ?? arena) ? (
+                  <AppMap
+                    center={(place ?? arena)!}
+                    user={place ?? undefined}
+                    marker={
+                      place
+                        ? {
+                            point: place,
+                            label: place.address ?? 'Lokasi sesi',
+                            tone: 'session',
+                          }
+                        : undefined
+                    }
+                    fence={arena ? { point: arena, radiusM: arena.radiusM } : undefined}
+                    height={160}
+                    accessibilityLabel={
+                      place
+                        ? 'Peta lokasi permainan saat ini'
+                        : `Peta arena ${arena?.name ?? 'permainan'}`
+                    }
+                  />
+                ) : (
+                  <View style={styles.mapPlaceholder}>
+                    <MaterialIcons name="map" size={24} color={Colors.muted} />
+                    <Text style={styles.mapPlaceholderText}>
+                      Peta muncul setelah lokasi perangkat tersedia.
+                    </Text>
+                  </View>
+                )}
+                {placeStatus === 'locating' ? (
+                  <View style={styles.loadingRow}>
+                    <ActivityIndicator size="small" color={Colors.accent} />
+                    <Text style={styles.hint}>Mengambil lokasi dan alamat…</Text>
+                  </View>
+                ) : place ? (
+                  <View style={styles.locationInfo}>
+                    <Text style={styles.locationAddress}>
+                      {place.address ?? 'Alamat belum tersedia'}
+                    </Text>
+                    <Text style={styles.hint}>
+                      {formatCoords(place)}
+                      {place.accuracy != null ? ` • akurasi ${formatDistance(place.accuracy)}` : ''}
+                    </Text>
+                    <Text style={styles.hint}>
+                      Lokasi otomatis disimpan saat permainan dimulai.
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.hint}>
+                    {placeError ??
+                      'Tekan “Ambil Lokasi” untuk menandai tempat permainan dimulai.'}
+                  </Text>
+                )}
+                {insideFence === false && arena ? (
+                  <StatusBanner
+                    tone="info"
+                    text={`Anda di luar arena ${arena.name} (${formatDistance(
+                      distanceToArena,
+                    )} dari pusat). Game tetap bisa dimulai.`}
+                  />
+                ) : insideFence && arena ? (
+                  <View style={styles.insideRow}>
+                    <MaterialIcons name="check-circle" size={16} color={Colors.accent} />
+                    <Text style={styles.insideText}>
+                      Anda berada di dalam arena {arena.name}.
+                    </Text>
+                  </View>
+                ) : null}
+                <View style={styles.actions}>
+                  <View style={styles.actionGrow}>
+                    <AppButton
+                      label={place ? 'Perbarui Lokasi' : 'Ambil Lokasi'}
+                      variant="ghost"
+                      loading={refreshingPlace || placeStatus === 'locating'}
+                      loadingLabel="Mengambil…"
+                      onPress={handleRefreshPlace}
+                    />
+                  </View>
+                </View>
+              </>
+            ) : (
+              <Text style={styles.hint}>
+                Lokasi tidak akan disertakan pada sesi ini. Bisa diaktifkan lagi kapan saja.
+              </Text>
+            )}
+          </View>
           <View style={styles.readyRow}>
             <MaterialIcons
               name={canStart ? 'check-circle' : 'warning'}
@@ -475,4 +626,42 @@ const styles = StyleSheet.create({
   readyText: { color: Colors.accent, fontFamily: FontFamily.bodySemi, fontSize: 14 },
   readyWarn: { color: Colors.danger },
   banner: { marginHorizontal: 16, marginTop: 12 },
+  locationCard: {
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.lg,
+    padding: 16,
+    gap: 10,
+  },
+  locationTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  mapPlaceholder: {
+    height: 120,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.raised,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    padding: 16,
+  },
+  mapPlaceholderText: {
+    color: Colors.muted,
+    fontFamily: FontFamily.body,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  loadingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  locationInfo: { gap: 3 },
+  locationAddress: {
+    color: Colors.ink,
+    fontFamily: FontFamily.bodyMedium,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  insideRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  insideText: { color: Colors.accent, fontFamily: FontFamily.bodySemi, fontSize: 12 },
+  actions: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  actionGrow: { flexGrow: 1, flexBasis: '40%' },
 });

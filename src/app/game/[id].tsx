@@ -22,8 +22,11 @@ import { EmptyState } from '../../components/EmptyState';
 import { PlayerAvatar } from '../../components/PlayerAvatar';
 import { RankingModal } from '../../components/RankingModal';
 import { ScoreModal } from '../../components/ScoreModal';
+import { AppMap } from '../../components/location/AppMap';
 import { Colors, Common, FontFamily, MAX_CONTENT_WIDTH, MIN_TOUCH, Radius, Soft } from '../../theme';
 import { ranking, totals } from '../../scoring';
+import { formatCoords, formatDistance } from '../../location/geo';
+import { openInMaps } from '../../location/mapsLink';
 import { playerName, useStore } from '../../store';
 
 const ROW_H = 48;
@@ -44,6 +47,7 @@ export default function GameScreen() {
   const insets = useSafeAreaInsets();
   const sessions = useStore((s) => s.sessions);
   const players = useStore((s) => s.players);
+  const arena = useStore((s) => s.arena);
   const loadAll = useStore((s) => s.loadAll);
   const saveRound = useStore((s) => s.saveRound);
   const undoLastRound = useStore((s) => s.undoLastRound);
@@ -52,6 +56,7 @@ export default function GameScreen() {
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [showRanking, setShowRanking] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [showLocation, setShowLocation] = useState(false);
   const [confirmUndo, setConfirmUndo] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [winner, setWinner] = useState<string | null>(null);
@@ -86,6 +91,7 @@ export default function GameScreen() {
   const lead = ranks[0];
   const leadPlayer = lead ? players.find((p) => p.id === lead.playerId) : undefined;
   const ongoing = session?.status === 'ongoing';
+  const sessionLocation = session?.location;
 
   const announce = (message: string, tone: 'success' | 'error' = 'success') => {
     setToast({ text: message, tone });
@@ -235,6 +241,31 @@ export default function GameScreen() {
             {playerName(players, session.winnerPlayerId)} memenangkan permainan
           </Text>
         </View>
+      ) : null}
+      {sessionLocation ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Lokasi permainan: ${
+            sessionLocation.address ?? formatCoords(sessionLocation)
+          }. Ketuk untuk melihat peta.`}
+          onPress={() => setShowLocation(true)}
+          style={({ pressed }) => [styles.locationCard, pressed && styles.locationCardPressed]}>
+          <View style={styles.locationIcon}>
+            <MaterialIcons name="place" size={18} color={Colors.accent} />
+          </View>
+          <View style={styles.locationTextWrap}>
+            <Text style={styles.locationTitle} numberOfLines={1} ellipsizeMode="tail">
+              {sessionLocation.address ?? 'Lokasi permainan'}
+            </Text>
+            <Text style={styles.locationCoords} numberOfLines={1}>
+              {formatCoords(sessionLocation)}
+              {sessionLocation.accuracy != null
+                ? ` • akurasi ${formatDistance(sessionLocation.accuracy)}`
+                : ''}
+            </Text>
+          </View>
+          <MaterialIcons name="map" size={18} color={Colors.muted} />
+        </Pressable>
       ) : null}
       <View style={styles.gridHint}>
         <View style={styles.gridHintLeft}>
@@ -563,6 +594,74 @@ export default function GameScreen() {
         onConfirm={handleDeleteSession}
       />
       <Modal
+        visible={showLocation && sessionLocation != null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowLocation(false)}
+        accessibilityViewIsModal>
+        <View style={styles.menuOverlay}>
+          <View
+            accessibilityLabel="Detail lokasi permainan"
+            style={[styles.locationSheet, { paddingBottom: insets.bottom + 16 }]}>
+            <View style={styles.sheetHead}>
+              <Text accessibilityRole="header" style={styles.menuTitle}>
+                Lokasi Permainan
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Tutup detail lokasi"
+                onPress={() => setShowLocation(false)}
+                hitSlop={8}
+                style={styles.sheetClose}>
+                <MaterialIcons name="close" size={22} color={Colors.muted} />
+              </Pressable>
+            </View>
+            {sessionLocation ? (
+              <>
+                <AppMap
+                  center={sessionLocation}
+                  marker={{
+                    point: sessionLocation,
+                    label: sessionLocation.address ?? 'Lokasi permainan',
+                    tone: 'session',
+                  }}
+                  fence={arena ? { point: arena, radiusM: arena.radiusM } : undefined}
+                  height={220}
+                  accessibilityLabel={`Peta lokasi permainan ${
+                    sessionLocation.address ?? formatCoords(sessionLocation)
+                  }`}
+                />
+                <Text style={styles.locationSheetAddress}>
+                  {sessionLocation.address ?? 'Alamat belum tersedia'}
+                </Text>
+                <Text style={styles.locationSheetMeta}>
+                  {formatCoords(sessionLocation)}
+                  {sessionLocation.accuracy != null
+                    ? ` • akurasi ${formatDistance(sessionLocation.accuracy)}`
+                    : ''}
+                </Text>
+                <Text style={styles.locationSheetMeta}>
+                  Diambil{' '}
+                  {new Date(sessionLocation.capturedAt).toLocaleString('id-ID', {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  })}
+                </Text>
+                <AppButton
+                  label="Buka di Aplikasi Peta"
+                  onPress={() => void openInMaps(sessionLocation, sessionLocation.address)}
+                />
+                <AppButton
+                  label="Tutup"
+                  variant="ghost"
+                  onPress={() => setShowLocation(false)}
+                />
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+      <Modal
         visible={winner !== null}
         transparent
         animationType="fade"
@@ -638,6 +737,60 @@ function MenuRow({
 }
 
 const styles = StyleSheet.create({
+  locationCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginHorizontal: 16,
+    marginTop: 8,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    paddingHorizontal: 12,
+    minHeight: MIN_TOUCH,
+    paddingVertical: 8,
+  },
+  locationCardPressed: { opacity: 0.7 },
+  locationIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: Soft.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationTextWrap: { flex: 1, gap: 1 },
+  locationTitle: { color: Colors.ink, fontFamily: FontFamily.bodySemi, fontSize: 13 },
+  locationCoords: { color: Colors.muted, fontFamily: FontFamily.body, fontSize: 11 },
+  locationSheet: {
+    backgroundColor: Colors.card,
+    borderTopLeftRadius: Radius.lg,
+    borderTopRightRadius: Radius.lg,
+    borderTopWidth: 1,
+    borderColor: Colors.border,
+    padding: 16,
+    gap: 10,
+  },
+  sheetHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  sheetClose: {
+    width: MIN_TOUCH,
+    height: MIN_TOUCH,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationSheetAddress: {
+    color: Colors.ink,
+    fontFamily: FontFamily.bodyMedium,
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  locationSheetMeta: { color: Colors.muted, fontFamily: FontFamily.body, fontSize: 12 },
   leader: {
     flexDirection: 'row',
     alignItems: 'center',
