@@ -62,6 +62,25 @@ export interface RankEntry {
   rank: number;
 }
 
+export interface GeofenceZone {
+  name: string;
+  latitude: number;
+  longitude: number;
+  radius: number;
+  enabled: boolean;
+  updatedAt: string;
+}
+
+export type GeofenceEventType = 'enter' | 'exit';
+
+export interface GeofenceEvent {
+  id: number;
+  type: GeofenceEventType;
+  latitude: number;
+  longitude: number;
+  occurredAt: string;
+}
+
 export function newId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }

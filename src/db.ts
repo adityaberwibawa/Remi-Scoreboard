@@ -3,6 +3,9 @@ import * as SQLite from 'expo-sqlite';
 import type {
   AvatarColorStyle,
   GameSession,
+  GeofenceEvent,
+  GeofenceEventType,
+  GeofenceZone,
   Participant,
   Player,
   Round,
@@ -79,6 +82,22 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
       payload TEXT NOT NULL,
       updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS geofence_zone (
+      id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+      name TEXT NOT NULL,
+      latitude REAL NOT NULL,
+      longitude REAL NOT NULL,
+      radius REAL NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS geofence_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      latitude REAL NOT NULL,
+      longitude REAL NOT NULL,
+      occurred_at TEXT NOT NULL
     );
   `);
 }
@@ -338,6 +357,99 @@ export async function writeTemplateCache(payload: string): Promise<void> {
     payload,
     new Date().toISOString(),
   );
+}
+
+interface GeofenceZoneRow {
+  name: string;
+  latitude: number;
+  longitude: number;
+  radius: number;
+  enabled: number;
+  updated_at: string;
+}
+
+export async function readGeofenceZone(): Promise<GeofenceZone | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<GeofenceZoneRow>(
+    'SELECT name, latitude, longitude, radius, enabled, updated_at FROM geofence_zone WHERE id = 1',
+  );
+  if (!row) return null;
+  return {
+    name: row.name,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    radius: row.radius,
+    enabled: row.enabled === 1,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function saveGeofenceZone(zone: GeofenceZone): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT INTO geofence_zone (id, name, latitude, longitude, radius, enabled, updated_at)
+     VALUES (1, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       name = excluded.name,
+       latitude = excluded.latitude,
+       longitude = excluded.longitude,
+       radius = excluded.radius,
+       enabled = excluded.enabled,
+       updated_at = excluded.updated_at`,
+    zone.name,
+    zone.latitude,
+    zone.longitude,
+    zone.radius,
+    zone.enabled ? 1 : 0,
+    zone.updatedAt,
+  );
+}
+
+export async function deleteGeofenceZone(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM geofence_zone WHERE id = 1');
+  await db.runAsync('DELETE FROM geofence_events');
+}
+
+interface GeofenceEventRow {
+  id: number;
+  type: string;
+  latitude: number;
+  longitude: number;
+  occurred_at: string;
+}
+
+export async function insertGeofenceEvent(
+  event: Omit<GeofenceEvent, 'id'>,
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    'INSERT INTO geofence_events (type, latitude, longitude, occurred_at) VALUES (?, ?, ?, ?)',
+    event.type,
+    event.latitude,
+    event.longitude,
+    event.occurredAt,
+  );
+}
+
+export async function fetchGeofenceEvents(limit = 20): Promise<GeofenceEvent[]> {
+  const db = await getDb();
+  const rows = await db.getAllAsync<GeofenceEventRow>(
+    'SELECT id, type, latitude, longitude, occurred_at FROM geofence_events ORDER BY occurred_at DESC, id DESC LIMIT ?',
+    limit,
+  );
+  return rows.map((row) => ({
+    id: row.id,
+    type: row.type as GeofenceEventType,
+    latitude: row.latitude,
+    longitude: row.longitude,
+    occurredAt: row.occurred_at,
+  }));
+}
+
+export async function clearGeofenceEvents(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM geofence_events');
 }
 
 /** Ganti seluruh data lokal dengan snapshot cloud (pulihkan cadangan). */
