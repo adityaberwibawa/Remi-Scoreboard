@@ -2,35 +2,49 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as Location from 'expo-location';
 import {
   clearGeofenceEvents,
+  clearGeofenceState,
   deleteGeofenceZone,
   fetchGeofenceEvents,
-  insertGeofenceEvent,
   readGeofenceZone,
+  recordGeofenceTransition,
   saveGeofenceZone,
 } from '../db';
 import type { GeofenceEvent, GeofenceZone } from '../types';
 import { geofenceSnapshot, type GeoPoint } from '../location/geo';
+import { geofenceAreaSignature } from '../location/geofenceState';
 import {
   applyGeofenceMonitoring,
-  type GeofenceMonitoringMode,
   type GeofenceMonitoringResult,
 } from '../location/geofenceTask';
+import {
+  getGeofenceNotificationPermissionAsync,
+  notifyGeofenceTransition,
+  requestGeofenceNotificationPermissionAsync,
+  type GeofenceNotificationPermission,
+} from '../location/geofenceNotifications';
 
 export function useGeofence(current: GeoPoint | null) {
   const [zone, setZoneState] = useState<GeofenceZone | null>(null);
   const [events, setEvents] = useState<GeofenceEvent[]>([]);
   const [monitoring, setMonitoring] = useState<GeofenceMonitoringResult>({ mode: 'off' });
+  const [notificationPermission, setNotificationPermission] =
+    useState<GeofenceNotificationPermission>('undetermined');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const lastInsideRef = useRef<boolean | null>(null);
+  const lastZoneSignatureRef = useRef<string | null>(null);
   const zoneRef = useRef<GeofenceZone | null>(null);
-  const monitoringRef = useRef<GeofenceMonitoringMode>('off');
+
+  const checkNotificationPermission = useCallback(async () => {
+    const result = await getGeofenceNotificationPermissionAsync();
+    setNotificationPermission(result);
+    return result;
+  }, []);
 
   const syncMonitoring = useCallback(async (next: GeofenceZone | null) => {
     const result = await applyGeofenceMonitoring(next);
-    monitoringRef.current = result.mode;
     setMonitoring(result);
     return result;
   }, []);
@@ -46,14 +60,19 @@ export function useGeofence(current: GeoPoint | null) {
       setZoneState(saved);
       setEvents(latest);
       setError(null);
-      if (!saved || !saved.enabled) lastInsideRef.current = null;
+      if (!saved || !saved.enabled) {
+        lastInsideRef.current = null;
+        lastZoneSignatureRef.current = null;
+        await clearGeofenceState().catch(() => undefined);
+      }
       await syncMonitoring(saved);
+      void checkNotificationPermission();
     } catch {
       setError('Gagal memuat area geofence. Coba lagi.');
     } finally {
       setLoading(false);
     }
-  }, [syncMonitoring]);
+  }, [checkNotificationPermission, syncMonitoring]);
 
   const save = useCallback(
     async (next: GeofenceZone): Promise<boolean> => {
@@ -61,17 +80,41 @@ export function useGeofence(current: GeoPoint | null) {
       setError(null);
       setNotice(null);
       try {
+        const previous = zoneRef.current;
         await saveGeofenceZone(next);
+
+        const areaChanged =
+          !previous ||
+          geofenceAreaSignature(previous) !== geofenceAreaSignature(next);
+        if (!next.enabled || areaChanged) {
+          await clearGeofenceState();
+        }
+
         zoneRef.current = next;
         setZoneState(next);
         lastInsideRef.current = null;
+        lastZoneSignatureRef.current = geofenceAreaSignature(next);
+
         const result = await syncMonitoring(next);
+        let notification = notificationPermission;
+        if (next.enabled) {
+          notification = await requestGeofenceNotificationPermissionAsync();
+          setNotificationPermission(notification);
+        }
+
+        const notificationHint =
+          next.enabled && notification !== 'granted'
+            ? notification === 'unavailable'
+              ? ' Notifikasi tidak tersedia di perangkat ini.'
+              : ' Izin notifikasi belum diberikan; riwayat tetap tercatat.'
+            : '';
+
         if (result.mode === 'background') {
-          setNotice('Area tersimpan dan dipantau di latar belakang.');
+          setNotice(`Area tersimpan dan dipantau di latar belakang.${notificationHint}`);
         } else if (result.mode === 'foreground') {
-          setNotice('Area tersimpan. Geofence dicek saat aplikasi terbuka.');
+          setNotice(`Area tersimpan. Geofence dicek saat aplikasi terbuka.${notificationHint}`);
         } else {
-          setNotice('Area tersimpan. Geofence dalam keadaan nonaktif.');
+          setNotice(`Area tersimpan. Geofence dalam keadaan nonaktif.${notificationHint}`);
         }
         return true;
       } catch {
@@ -81,7 +124,7 @@ export function useGeofence(current: GeoPoint | null) {
         setSaving(false);
       }
     },
-    [syncMonitoring],
+    [notificationPermission, syncMonitoring],
   );
 
   const remove = useCallback(async (): Promise<boolean> => {
@@ -94,6 +137,7 @@ export function useGeofence(current: GeoPoint | null) {
       setZoneState(null);
       setEvents([]);
       lastInsideRef.current = null;
+      lastZoneSignatureRef.current = null;
       await syncMonitoring(null);
       setNotice('Area geofence dihapus.');
       return true;
@@ -149,29 +193,54 @@ export function useGeofence(current: GeoPoint | null) {
     }
   }, [syncMonitoring]);
 
+  const requestNotifications = useCallback(async (): Promise<GeofenceNotificationPermission> => {
+    setError(null);
+    setNotice(null);
+    const result = await requestGeofenceNotificationPermissionAsync();
+    setNotificationPermission(result);
+    if (result === 'granted') {
+      setNotice('Notifikasi area bermain aktif.');
+    } else if (result === 'denied') {
+      setNotice('Izin notifikasi ditolak. Riwayat tetap tercatat.');
+    } else if (result === 'unavailable') {
+      setNotice('Notifikasi tidak tersedia di perangkat ini.');
+    }
+    return result;
+  }, []);
+
   useEffect(() => {
     if (!zone || !zone.enabled || !current) {
       lastInsideRef.current = null;
+      lastZoneSignatureRef.current = null;
       return;
     }
+
+    const signature = geofenceAreaSignature(zone);
+    if (lastZoneSignatureRef.current !== signature) {
+      lastZoneSignatureRef.current = signature;
+      lastInsideRef.current = null;
+    }
+
     const snapshot = geofenceSnapshot(current, zone);
     if (!Number.isFinite(snapshot.distance)) return;
-    if (lastInsideRef.current === null) {
-      lastInsideRef.current = snapshot.inside;
-      return;
-    }
     if (lastInsideRef.current === snapshot.inside) return;
     lastInsideRef.current = snapshot.inside;
-    if (monitoringRef.current === 'background') return;
-    const event = {
-      type: snapshot.inside ? ('enter' as const) : ('exit' as const),
+
+    const eventPoint = {
       latitude: current.latitude,
       longitude: current.longitude,
       occurredAt: new Date().toISOString(),
     };
-    void insertGeofenceEvent(event)
-      .then(() => fetchGeofenceEvents(20))
-      .then(setEvents)
+    void recordGeofenceTransition({
+      zoneSignature: signature,
+      inside: snapshot.inside,
+      ...eventPoint,
+    })
+      .then((inserted) => {
+        if (!inserted) return;
+        void notifyGeofenceTransition(inserted, zone.name);
+        return fetchGeofenceEvents(20).then(setEvents);
+      })
       .catch(() => setError('Gagal mencatat event geofence.'));
   }, [current, zone]);
 
@@ -184,6 +253,7 @@ export function useGeofence(current: GeoPoint | null) {
     zone,
     events,
     monitoring,
+    notificationPermission,
     status,
     loading,
     saving,
@@ -194,6 +264,7 @@ export function useGeofence(current: GeoPoint | null) {
     remove,
     clearHistory,
     requestBackground,
+    requestNotifications,
     setError,
     setNotice,
   };
