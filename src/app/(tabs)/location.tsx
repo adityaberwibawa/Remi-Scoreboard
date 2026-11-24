@@ -328,11 +328,7 @@ export default function LocationScreen() {
                     <MaterialIcons name="place" size={20} color={Colors.accent} />
                     <Text style={styles.address}>
                       {reverse.address ||
-                        (reverse.loading
-                          ? 'Mencari alamat…'
-                          : Platform.OS === 'web'
-                            ? 'Alamat tidak tersedia di web.'
-                            : 'Alamat belum tersedia.')}
+                        (reverse.loading ? 'Mencari alamat…' : 'Alamat belum tersedia.')}
                     </Text>
                   </View>
                   {reverse.error ? <Text style={styles.hint}>{reverse.error}</Text> : null}
@@ -552,6 +548,63 @@ export default function LocationScreen() {
                 </Text>
               </View>
 
+              {saved.enabled && Platform.OS !== 'web' ? (
+                <View style={styles.notificationRow}>
+                  <MaterialIcons
+                    name={
+                      geofence.notificationPermission === 'granted'
+                        ? 'notifications-active'
+                        : 'notifications-off'
+                    }
+                    size={18}
+                    color={
+                      geofence.notificationPermission === 'granted'
+                        ? Colors.accent
+                        : Colors.gold
+                    }
+                  />
+                  <View style={styles.flex}>
+                    <Text style={styles.monitoringText}>
+                      {geofence.notificationPermission === 'granted'
+                        ? 'Notifikasi aktif'
+                        : geofence.notificationPermission === 'unavailable'
+                          ? 'Notifikasi tidak tersedia'
+                          : 'Notifikasi belum aktif'}
+                    </Text>
+                    {geofence.notificationPermission !== 'granted' &&
+                    geofence.notificationPermission !== 'unavailable' ? (
+                      <Text style={styles.hint}>
+                        Dapatkan pemberitahuan saat masuk atau keluar area.
+                      </Text>
+                    ) : null}
+                  </View>
+                  {geofence.notificationPermission !== 'granted' &&
+                  geofence.notificationPermission !== 'unavailable' ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        geofence.notificationPermission === 'denied'
+                          ? 'Buka pengaturan notifikasi'
+                          : 'Aktifkan notifikasi area bermain'
+                      }
+                      onPress={() => {
+                        if (geofence.notificationPermission === 'denied') {
+                          void Linking.openSettings().catch(() => undefined);
+                        } else {
+                          void geofence.requestNotifications();
+                        }
+                      }}
+                      style={styles.notificationAction}>
+                      <Text style={styles.notificationActionText}>
+                        {geofence.notificationPermission === 'denied'
+                          ? 'Pengaturan'
+                          : 'Aktifkan'}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
+
               {showBackgroundAction ? (
                 <AppButton
                   label="Aktifkan Latar Belakang"
@@ -754,6 +807,13 @@ const styles = StyleSheet.create({
   monitoringRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   monitoringDot: { width: 8, height: 8, borderRadius: 4 },
   monitoringText: { flex: 1, fontFamily: FontFamily.bodyMedium, fontSize: 12, lineHeight: 18 },
+  notificationRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  notificationAction: {
+    minHeight: MIN_TOUCH,
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  notificationActionText: { color: Colors.accent, fontFamily: FontFamily.bodySemi, fontSize: 13 },
   clearButton: {
     minHeight: MIN_TOUCH,
     justifyContent: 'center',

@@ -24,6 +24,7 @@ import { AppButton } from '../components/AppButton';
 import { NetworkBanner } from '../components/NetworkBanner';
 import { StatusBanner } from '../components/StatusBanner';
 import '../location/geofenceTask';
+import { ensureGeofenceNotificationChannelAsync } from '../location/geofenceNotifications';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
@@ -63,6 +64,10 @@ export default function RootLayout() {
   useEffect(() => {
     loadAll().catch(() => undefined);
   }, [loadAll]);
+
+  useEffect(() => {
+    void ensureGeofenceNotificationChannelAsync();
+  }, []);
 
   useEffect(() => {
     authInit().catch(() => undefined);

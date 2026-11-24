@@ -57,9 +57,16 @@ export function distanceMeters(from: GeoPoint, to: GeoPoint): number {
   const lat2 = toRadians(to.latitude);
   const deltaLat = toRadians(to.latitude - from.latitude);
   const deltaLon = toRadians(to.longitude - from.longitude);
-  const a =
-    Math.sin(deltaLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
+  // Kesalahan pembulatan dapat membuat a sedikit di atas 1 untuk titik antipodal.
+  // Clamp sebelum sqrt agar hasil tidak menjadi NaN.
+  const a = Math.min(
+    1,
+    Math.max(
+      0,
+      Math.sin(deltaLat / 2) ** 2 +
+        Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2,
+    ),
+  );
   return 2 * EARTH_RADIUS_M * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 

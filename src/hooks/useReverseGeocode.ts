@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Platform } from 'react-native';
-import * as Location from 'expo-location';
-import { distanceMeters, formatGeocodedAddress, type GeoPoint } from '../location/geo';
+import { distanceMeters, type GeoPoint } from '../location/geo';
+import { reverseGeocodeAddress } from '../location/reverseGeocode';
 
 const MIN_MOVE_METERS = 50;
 
@@ -13,10 +12,6 @@ export function useReverseGeocode(point: GeoPoint | null) {
   const requestIdRef = useRef(0);
 
   const geocode = useCallback(async (target: GeoPoint, force: boolean) => {
-    if (Platform.OS === 'web') {
-      setAddress('');
-      return;
-    }
     if (!force && lastPointRef.current) {
       const moved = distanceMeters(lastPointRef.current, target);
       if (Number.isFinite(moved) && moved < MIN_MOVE_METERS) return;
@@ -26,15 +21,12 @@ export function useReverseGeocode(point: GeoPoint | null) {
     requestIdRef.current = requestId;
     setLoading(true);
     setError(null);
+    setAddress('');
     try {
-      const results = await Location.reverseGeocodeAsync({
-        latitude: target.latitude,
-        longitude: target.longitude,
-      });
+      const formatted = await reverseGeocodeAddress(target, { force });
       if (requestIdRef.current !== requestId) return;
-      const formatted = formatGeocodedAddress(results[0]);
       setAddress(formatted);
-      if (!formatted) setError('Alamat tidak ditemukan untuk titik ini.');
+      if (!formatted) setError('Alamat tidak ditemukan. Koordinat tetap bisa dipakai.');
     } catch {
       if (requestIdRef.current !== requestId) return;
       setAddress('');

@@ -15,6 +15,9 @@ import type {
 
 const AVATAR_STYLES: AvatarColorStyle[] = ['emerald', 'gold', 'crimson', 'slate'];
 
+/** Jumlah maksimum riwayat geofence yang disimpan di perangkat. */
+export const MAX_GEOFENCE_EVENTS = 200;
+
 function toColorStyle(value: string | null): AvatarColorStyle {
   return AVATAR_STYLES.includes(value as AvatarColorStyle)
     ? (value as AvatarColorStyle)
@@ -99,7 +102,17 @@ async function migrate(db: SQLite.SQLiteDatabase): Promise<void> {
       longitude REAL NOT NULL,
       occurred_at TEXT NOT NULL
     );
+    CREATE INDEX IF NOT EXISTS idx_geofence_events_occurred_at
+      ON geofence_events (occurred_at DESC, id DESC);
+    CREATE TABLE IF NOT EXISTS geofence_state (
+      id INTEGER PRIMARY KEY NOT NULL CHECK (id = 1),
+      zone_signature TEXT NOT NULL,
+      inside INTEGER NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
+  // Bersihkan riwayat lama dari versi sebelum pruning diperkenalkan.
+  await pruneGeofenceEventsWithDb(db);
 }
 
 interface PlayerRow {
@@ -407,8 +420,11 @@ export async function saveGeofenceZone(zone: GeofenceZone): Promise<void> {
 
 export async function deleteGeofenceZone(): Promise<void> {
   const db = await getDb();
-  await db.runAsync('DELETE FROM geofence_zone WHERE id = 1');
-  await db.runAsync('DELETE FROM geofence_events');
+  await db.withTransactionAsync(async () => {
+    await db.runAsync('DELETE FROM geofence_zone WHERE id = 1');
+    await db.runAsync('DELETE FROM geofence_events');
+    await db.runAsync('DELETE FROM geofence_state');
+  });
 }
 
 interface GeofenceEventRow {
@@ -419,24 +435,105 @@ interface GeofenceEventRow {
   occurred_at: string;
 }
 
-export async function insertGeofenceEvent(
-  event: Omit<GeofenceEvent, 'id'>,
+interface GeofenceStateRow {
+  zone_signature: string;
+  inside: number;
+  updated_at: string;
+}
+
+export interface GeofenceTransitionInput {
+  /** Signature area; berubah saat pusat/radius berubah. */
+  zoneSignature: string;
+  /** Status setelah transisi. */
+  inside: boolean;
+  latitude: number;
+  longitude: number;
+  occurredAt: string;
+}
+
+async function writeGeofenceState(
+  db: SQLite.SQLiteDatabase,
+  signature: string,
+  inside: boolean,
+  updatedAt: string,
 ): Promise<void> {
-  const db = await getDb();
   await db.runAsync(
-    'INSERT INTO geofence_events (type, latitude, longitude, occurred_at) VALUES (?, ?, ?, ?)',
-    event.type,
-    event.latitude,
-    event.longitude,
-    event.occurredAt,
+    `INSERT INTO geofence_state (id, zone_signature, inside, updated_at)
+     VALUES (1, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       zone_signature = excluded.zone_signature,
+       inside = excluded.inside,
+       updated_at = excluded.updated_at`,
+    signature,
+    inside ? 1 : 0,
+    updatedAt,
   );
+}
+
+async function pruneGeofenceEventsWithDb(db: SQLite.SQLiteDatabase): Promise<void> {
+  await db.runAsync(
+    `DELETE FROM geofence_events
+     WHERE id NOT IN (
+       SELECT id FROM geofence_events
+       ORDER BY occurred_at DESC, id DESC
+       LIMIT ?
+     )`,
+    MAX_GEOFENCE_EVENTS,
+  );
+}
+
+/**
+ * Catat transisi hanya bila status benar-benar berubah dari state terakhir.
+ * Basis state disimpan di SQLite agar foreground dan background tidak
+ * menghasilkan event ganda. Observasi pertama hanya menjadi baseline.
+ */
+export async function recordGeofenceTransition(
+  input: GeofenceTransitionInput,
+): Promise<GeofenceEvent | null> {
+  if (!input.zoneSignature) return null;
+  const db = await getDb();
+  let inserted: GeofenceEvent | null = null;
+
+  await db.withTransactionAsync(async () => {
+    const state = await db.getFirstAsync<GeofenceStateRow>(
+      'SELECT zone_signature, inside, updated_at FROM geofence_state WHERE id = 1',
+    );
+    if (!state || state.zone_signature !== input.zoneSignature) {
+      await writeGeofenceState(db, input.zoneSignature, input.inside, input.occurredAt);
+      return;
+    }
+    if ((state.inside === 1) === input.inside) return;
+
+    const type: GeofenceEventType = input.inside ? 'enter' : 'exit';
+    const result = await db.runAsync(
+      'INSERT INTO geofence_events (type, latitude, longitude, occurred_at) VALUES (?, ?, ?, ?)',
+      type,
+      input.latitude,
+      input.longitude,
+      input.occurredAt,
+    );
+    inserted = {
+      id: Number(result.lastInsertRowId),
+      type,
+      latitude: input.latitude,
+      longitude: input.longitude,
+      occurredAt: input.occurredAt,
+    };
+    await writeGeofenceState(db, input.zoneSignature, input.inside, input.occurredAt);
+    await pruneGeofenceEventsWithDb(db);
+  });
+
+  return inserted;
 }
 
 export async function fetchGeofenceEvents(limit = 20): Promise<GeofenceEvent[]> {
   const db = await getDb();
+  const safeLimit = Number.isFinite(limit)
+    ? Math.min(MAX_GEOFENCE_EVENTS, Math.max(1, Math.floor(limit)))
+    : 20;
   const rows = await db.getAllAsync<GeofenceEventRow>(
     'SELECT id, type, latitude, longitude, occurred_at FROM geofence_events ORDER BY occurred_at DESC, id DESC LIMIT ?',
-    limit,
+    safeLimit,
   );
   return rows.map((row) => ({
     id: row.id,
@@ -450,6 +547,11 @@ export async function fetchGeofenceEvents(limit = 20): Promise<GeofenceEvent[]> 
 export async function clearGeofenceEvents(): Promise<void> {
   const db = await getDb();
   await db.runAsync('DELETE FROM geofence_events');
+}
+
+export async function clearGeofenceState(): Promise<void> {
+  const db = await getDb();
+  await db.runAsync('DELETE FROM geofence_state');
 }
 
 /** Ganti seluruh data lokal dengan snapshot cloud (pulihkan cadangan). */
