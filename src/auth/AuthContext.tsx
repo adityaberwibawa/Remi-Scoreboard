@@ -34,9 +34,31 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/** Baca `error.code` bawaan AuthError Supabase (lebih akurat daripada cocok string). */
+function readAuthCode(error: unknown): string | null {
+  if (typeof error === 'object' && error !== null && 'code' in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === 'string' && code.length > 0) return code;
+  }
+  return null;
+}
+
 /** Pesan error Supabase → Bahasa Indonesia, mengikuti gaya `src/api/errors.ts`. */
 export function authErrorMessage(error: unknown, fallback = 'Terjadi kesalahan. Coba lagi.'): string {
   const message = (error instanceof Error ? error.message : String(error ?? '')).toLowerCase();
+  const code = readAuthCode(error);
+
+  // Prioritas ke error code resmi Supabase (lihat @supabase/auth-js error-codes).
+  // Satu kode bisa mewakili dua limit berbeda — hanya pesan yang membedakan.
+  if (code === 'over_email_send_rate_limit') {
+    return message.includes('for security purposes') || message.includes('after')
+      ? 'Permintaan terlalu sering untuk email yang sama. Tunggu sekitar satu menit lalu coba lagi.'
+      : 'Terlalu banyak permintaan dari perangkat ini. Tunggu sekitar satu jam lalu coba lagi.';
+  }
+  if (code === 'over_request_rate_limit') {
+    return 'Server sedang membatasi permintaan. Coba lagi beberapa menit lagi.';
+  }
+
   if (message.includes('invalid login credentials')) return 'Email atau kata sandi salah.';
   if (message.includes('already registered') || message.includes('already been registered')) {
     return 'Email sudah terdaftar. Silakan masuk.';
@@ -45,6 +67,7 @@ export function authErrorMessage(error: unknown, fallback = 'Terjadi kesalahan. 
     return 'Email belum diverifikasi. Buka tautan di kotak masuk email kamu.';
   }
   if (message.includes('password should be at least')) return 'Kata sandi minimal 6 karakter.';
+  // Fallback untuk error tanpa code (mis. respons gateway non-standar).
   if (message.includes('rate limit') || message.includes('too many request')) {
     return 'Terlalu banyak percobaan. Coba lagi sebentar lagi.';
   }

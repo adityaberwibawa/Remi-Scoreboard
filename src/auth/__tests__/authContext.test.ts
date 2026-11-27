@@ -33,6 +33,40 @@ describe('authErrorMessage', () => {
   it('memakai fallback untuk error yang tidak dikenal', () => {
     expect(authErrorMessage('x'.repeat(400), 'Pesan cadangan.')).toBe('Pesan cadangan.');
   });
+
+  it('menerjemahkan limit pengiriman email per proyek (2/jam) berdasarkan error code', () => {
+    const error = Object.assign(new Error('email rate limit exceeded'), {
+      code: 'over_email_send_rate_limit',
+    });
+    expect(authErrorMessage(error)).toBe(
+      'Terlalu banyak permintaan dari perangkat ini. Tunggu sekitar satu jam lalu coba lagi.',
+    );
+  });
+
+  it('menerjemahkan jeda 60 detik untuk email yang sama (satu kode, pesan berbeda)', () => {
+    const error = Object.assign(
+      new Error('For security purposes, you can only request this after 60 seconds.'),
+      { code: 'over_email_send_rate_limit' },
+    );
+    expect(authErrorMessage(error)).toBe(
+      'Permintaan terlalu sering untuk email yang sama. Tunggu sekitar satu menit lalu coba lagi.',
+    );
+  });
+
+  it('menerjemahkan limit permintaan per IP', () => {
+    const error = Object.assign(new Error('Rate limit exceeded: too many requests'), {
+      code: 'over_request_rate_limit',
+    });
+    expect(authErrorMessage(error)).toBe(
+      'Server sedang membatasi permintaan. Coba lagi beberapa menit lagi.',
+    );
+  });
+
+  it('mempertahankan pesan generik untuk rate limit tanpa error code', () => {
+    expect(authErrorMessage(new Error('Rate limit exceeded'))).toBe(
+      'Terlalu banyak percobaan. Coba lagi sebentar lagi.',
+    );
+  });
 });
 
 describe('getDisplayName', () => {
