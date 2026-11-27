@@ -20,6 +20,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Colors } from '../theme';
 import { useStore } from '../store';
 import { useAuth } from '../auth/useAuth';
+import { AuthProvider, useAuthSession } from '../auth/AuthContext';
 import { AppButton } from '../components/AppButton';
 import { NetworkBanner } from '../components/NetworkBanner';
 import { StatusBanner } from '../components/StatusBanner';
@@ -39,6 +40,14 @@ export function ErrorBoundary({ error, retry }: ErrorBoundaryProps) {
 }
 
 export default function RootLayout() {
+  return (
+    <AuthProvider>
+      <RootNavigator />
+    </AuthProvider>
+  );
+}
+
+function RootNavigator() {
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -60,6 +69,8 @@ export default function RootLayout() {
   const locked = useAuth((s) => s.locked);
   const markBackground = useAuth((s) => s.markBackground);
   const checkAutoLock = useAuth((s) => s.checkAutoLock);
+  const { configured, status: sessionStatus } = useAuthSession();
+  const sessionLoading = configured && sessionStatus === 'loading';
 
   useEffect(() => {
     loadAll().catch(() => undefined);
@@ -82,8 +93,23 @@ export default function RootLayout() {
   }, [markBackground, checkAutoLock]);
 
   useEffect(() => {
-    if (!authReady || !ready || !navReady || loadError) return;
+    if (!authReady || !ready || !navReady || loadError || sessionLoading) return;
     const [group, screen] = segKey.split('/');
+
+    // Lapis 1 — sesi Supabase: wajib masuk untuk seluruh aplikasi.
+    // Dilewati bila env Supabase belum dikonfigurasi (mode lokal).
+    if (configured) {
+      if (sessionStatus === 'signedOut') {
+        if (group !== '(public)') router.replace('/sign-in');
+        return;
+      }
+      if (group === '(public)') {
+        router.replace('/(tabs)');
+        return;
+      }
+    }
+
+    // Lapis 2 — kunci PIN perangkat, berlaku setelah sesi akun terverifikasi.
     if (!hasPin) {
       if (screen !== 'setup') router.replace('/(auth)/setup');
     } else if (locked) {
@@ -91,15 +117,26 @@ export default function RootLayout() {
     } else if (group === '(auth)') {
       router.replace('/(tabs)');
     }
-  }, [authReady, ready, navReady, loadError, hasPin, locked, segKey]);
+  }, [
+    authReady,
+    ready,
+    navReady,
+    loadError,
+    sessionLoading,
+    configured,
+    sessionStatus,
+    hasPin,
+    locked,
+    segKey,
+  ]);
 
   useEffect(() => {
-    if ((fontsLoaded || fontError) && ready && authReady) {
+    if ((fontsLoaded || fontError) && ready && authReady && !sessionLoading) {
       SplashScreen.hideAsync().catch(() => undefined);
     }
-  }, [fontsLoaded, fontError, ready, authReady]);
+  }, [fontsLoaded, fontError, ready, authReady, sessionLoading]);
 
-  if ((!fontsLoaded && !fontError) || !ready || !authReady) {
+  if ((!fontsLoaded && !fontError) || !ready || !authReady || sessionLoading) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator
@@ -144,6 +181,7 @@ export default function RootLayout() {
           }}>
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="(auth)" />
+          <Stack.Screen name="(public)" />
           <Stack.Screen
             name="create"
             options={{ presentation: 'card', gestureEnabled: true }}
