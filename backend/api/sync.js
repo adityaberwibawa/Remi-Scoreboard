@@ -8,7 +8,7 @@ const MAX_ITEMS = 500;
 export default {
   async fetch(request) {
     if (request.method === 'OPTIONS') return options();
-    const user = bearerUser(request);
+    const user = await bearerUser(request);
     if (!user) return json(401, { error: 'Token tidak valid atau sudah kedaluwarsa.' });
 
     if (request.method === 'GET') {

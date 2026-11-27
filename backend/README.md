@@ -1,46 +1,47 @@
 # PentungScore API
 
-Vercel Functions API untuk akun PentungScore. Backend ini memakai Supabase Postgres melalui REST API dan Node.js built-in crypto; tidak memerlukan dependency runtime tambahan.
+Vercel Functions API untuk cadangan cloud PentungScore. Backend ini memakai Supabase Postgres melalui REST API dan Node.js built-in crypto; tidak memerlukan dependency runtime tambahan.
+
+Autentikasi dikelola oleh **Supabase Auth** di sisi aplikasi (sign up / sign in / sign out lewat `@supabase/supabase-js`). Backend hanya memvalidasi `access token` yang dikirim aplikasi.
 
 ## Endpoint
 
 | Method | Path | Fungsi |
 | --- | --- | --- |
-| `POST` | `/api/auth/register` | Membuat akun dan mengembalikan token |
-| `POST` | `/api/auth/login` | Login email/kata sandi |
-| `POST` | `/api/auth/refresh` | Rotasi refresh token |
-| `POST` | `/api/auth/logout` | Mencabut refresh token |
-| `GET` | `/api/me` | Memeriksa access token dan mengambil profil |
+| `GET` | `/api/me` | Memvalidasi access token Supabase dan mengambil profil |
 | `GET` | `/api/templates` | Daftar template sesi (publik, tanpa token) |
 | `GET` | `/api/sync` | Ambil cadangan pemain & sesi milik akun |
 | `PUT` | `/api/sync` | Simpan cadangan (snapshot terakhir menang) |
 
-Endpoint auth (`register`, `login`, `refresh`) dilindungi rate limit in-memory per IP (best-effort per instance Vercel): 5 pendaftaran / 10 menit, 10 login / 10 menit, 30 refresh / 10 menit. Untuk beban publik, ganti dengan limiter terdistribusi (mis. Redis/Upstash).
+Endpoint lama `/api/auth/register`, `/api/auth/login`, `/api/auth/refresh`, dan `/api/auth/logout` **dihapus** — akun dibuat dan sesi dikelola oleh Supabase Auth.
 
-Access token berlaku 15 menit. Refresh token berlaku 30 hari dan disimpan dalam bentuk hash di database. Kata sandi di-hash dengan scrypt.
+## Validasi token
 
-Klien mobile tersedia di `src/auth/accountApi.ts` dan dipakai oleh tab **Akun**. Base URL diambil dari env build-time `EXPO_PUBLIC_API_URL` (mis. `https://remi-scoreboard-backend.vercel.app`). Contoh pemakaian:
+`bearerUser()` di `lib/auth.js` memverifikasi `Authorization: Bearer <access token>` dengan memanggil `GET {SUPABASE_URL}/auth/v1/user` memakai `SUPABASE_SECRET_KEY` (server-side, tidak pernah dibagikan ke klien). Pendekatan ini berlaku untuk signing key asimetris (PS256/EdDSA) maupun JWT lama HS256, tanpa dependensi tambahan, dan selalu mengikuti status terbaru token di Supabase.
+
+## Klien mobile
+
+Klien cadangan cloud ada di `src/auth/accountApi.ts` (pakai access token dari sesi Supabase) dan tab **Akun** memakainya untuk Cadangkan / Pulihkan. Auth itu sendiri ada di `src/auth/AuthContext.tsx` + `src/auth/supabase.ts`. Base URL backend diambil dari env build-time `EXPO_PUBLIC_API_URL`; konfigurasi Supabase dari `EXPO_PUBLIC_SUPABASE_URL` dan `EXPO_PUBLIC_SUPABASE_ANON_KEY`.
 
 ```ts
-const accountApi = new AccountApi('https://<deployment>.vercel.app');
-await accountApi.login(email, password);
-const profile = await accountApi.currentUser();
-const snapshot = await accountApi.pullSnapshot();
-await accountApi.pushSnapshot(players, sessions);
-await accountApi.logout();
+const api = new AccountApi('https://<deployment>.vercel.app');
+const snapshot = await api.pullSnapshot();
+await api.pushSnapshot(players, sessions);
 ```
 
-Tab Akun memungkinkan login/daftar, mencadangkan snapshot pemain & sesi, memulihkannya dengan konfirmasi, dan keluar. PIN/biometrik tetap mengunci aplikasi secara lokal dan tidak dikirim ke server.
+Layar masuk/daftar ada di `src/app/(public)/sign-in.tsx` dan route guard di `src/app/_layout.tsx` mewajibkan sesi Supabase untuk seluruh aplikasi. PIN/biometrik tetap mengunci aplikasi secara lokal dan tidak dikirim ke server.
 
 ## Supabase
 
 1. Buat proyek Supabase.
 2. Buka **SQL Editor**, jalankan berurutan:
-   - `supabase/schema.sql` (akun + refresh token),
+   - `supabase/schema.sql` (tabel akun lama — hanya untuk instalasi baru yang masih pakai versi lama; dapat dilewati),
    - `supabase/templates.sql` (template sesi + seed),
    - `supabase/002_template_rules.sql` (jika tabel template sudah ada sebelum upgrade kolom aturan),
-   - `supabase/003_user_snapshots.sql` (cadangan cloud per akun).
-3. Dari **Project Settings > API Keys**, salin Project URL dan secret key (`sb_secret_...`). Jangan pernah menaruh secret key di aplikasi Expo. Backend juga masih menerima nama variabel lama `SUPABASE_SERVICE_ROLE_KEY` untuk transisi.
+   - `supabase/003_user_snapshots.sql` (cadangan cloud per akun),
+   - `supabase/004_supabase_auth.sql` (migrasi ke Supabase Auth: ganti FK `user_snapshots` ke `auth.users` dan hapus tabel akun custom).
+3. Dari **Project Settings > API Keys**, salin Project URL, publishable key (`sb_publishable_...`), dan secret key (`sb_secret_...`). Jangan pernah menaruh secret key di aplikasi Expo. Backend juga masih menerima nama variabel lama `SUPABASE_SERVICE_ROLE_KEY` untuk transisi.
+4. **Authentication → Sign In / Providers → Email**: matikan *Confirm email* bila tidak memerlukan verifikasi inbox (aplikasi tetap menangani kasus verifikasi aktif).
 
 ## Deploy ke Vercel
 
@@ -49,19 +50,17 @@ Tab Akun memungkinkan login/daftar, mencadangkan snapshot pemain & sesi, memulih
 3. Tambahkan environment variables untuk Production (dan Preview bila diperlukan):
    - `SUPABASE_URL` — URL proyek Supabase.
    - `SUPABASE_SECRET_KEY` — secret server-side (`sb_secret_...`) dari Supabase.
-   - `TOKEN_SECRET` — secret acak minimal 32 karakter, misalnya hasil `openssl rand -base64 48`.
 4. Deploy. Endpoint akan berada di `https://<deployment>.vercel.app/api/...`.
 
 ## Uji manual
 
 ```sh
-curl -X POST https://<deployment>.vercel.app/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Budi","email":"budi@example.com","password":"rahasia123"}'
+# 1. Ambil access token dari aplikasi (sesi Supabase), lalu:
+curl https://<deployment>.vercel.app/api/me \
+  -H "Authorization: Bearer <access token>"
 ```
 
 ## Catatan
 
 - Paket Vercel Hobby hanya untuk proyek pribadi/nonkomersial; lihat ketentuan paket Vercel sebelum penggunaan publik/komersial.
-- Proyek ini belum membatasi percobaan login per alamat IP. Tambahkan rate limiting sebelum membuka registrasi untuk publik.
-- Fungsi `/api/me` memvalidasi access token. Endpoint data pemain dan sesi belum dibuat; tambahkan setelah database dan alur akun siap.
+- Rate limit endpoint auth tidak lagi diperlukan di backend karena pendaftaran/login diproses Supabase Auth (punya proteksi bawaan).

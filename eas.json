@@ -11,7 +11,9 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://remi-scoreboard-backend.vercel.app"
+        "EXPO_PUBLIC_API_URL": "https://remi-scoreboard-backend.vercel.app",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://cmuznfgsevzpozejjzxx.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_ldp5kYADHEiTlVwbgyh0KA_iWrQiGMZ"
       }
     },
     "production": {
@@ -20,7 +22,9 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://remi-scoreboard-backend.vercel.app"
+        "EXPO_PUBLIC_API_URL": "https://remi-scoreboard-backend.vercel.app",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://cmuznfgsevzpozejjzxx.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_ldp5kYADHEiTlVwbgyh0KA_iWrQiGMZ"
       }
     }
   }
